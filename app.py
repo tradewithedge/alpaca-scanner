@@ -5,7 +5,16 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from scanner.alpaca_client import AlpacaClient, AlpacaCredentials
-from scanner.config import ScannerConfig, MARKET_SYMBOLS, SECTOR_ETFS, QUALITY_PRESETS
+
+# Streamlit hot-reload guard: force scanner.config to refresh after multi-file GitHub updates.
+import importlib
+import scanner.config as scanner_config
+scanner_config = importlib.reload(scanner_config)
+ScannerConfig = scanner_config.ScannerConfig
+MARKET_SYMBOLS = scanner_config.MARKET_SYMBOLS
+SECTOR_ETFS = scanner_config.SECTOR_ETFS
+QUALITY_PRESETS = scanner_config.QUALITY_PRESETS
+
 from scanner.indicators import add_indicators, latest_snapshot
 from scanner.regime import aggregate_regime, with_breadth
 from scanner.scoring import build_cross_section, apply_quality_filters, score_universe
