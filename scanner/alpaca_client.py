@@ -25,7 +25,7 @@ class AlpacaClient:
         self.session.headers.update({
             "APCA-API-KEY-ID": creds.key_id,
             "APCA-API-SECRET-KEY": creds.secret_key,
-            "User-Agent": "alpaca-scanner-v1",
+            "User-Agent": "alpaca-scanner-v1.1",
         })
 
     def _get(self, url: str, params: Optional[dict] = None, retries: int = 3):
@@ -64,8 +64,8 @@ class AlpacaClient:
                 out.update(payload)
         return out
 
-    def get_daily_bars(self, symbols: List[str], days: int = 120, batch_size: int = 40) -> pd.DataFrame:
-        start = (datetime.now(timezone.utc) - timedelta(days=max(days * 2, 180))).strftime("%Y-%m-%dT00:00:00Z")
+    def get_daily_bars(self, symbols: List[str], days: int = 280, batch_size: int = 40) -> pd.DataFrame:
+        start = (datetime.now(timezone.utc) - timedelta(days=max(days * 2, 420))).strftime("%Y-%m-%dT00:00:00Z")
         end = datetime.now(timezone.utc).strftime("%Y-%m-%dT23:59:59Z")
         url = f"{self.creds.data_base_url.rstrip('/')}/v2/stocks/bars"
         rows = []

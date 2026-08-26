@@ -6,13 +6,18 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     g["ema8"] = g["close"].ewm(span=8, adjust=False).mean()
     g["ema20"] = g["close"].ewm(span=20, adjust=False).mean()
     g["ma50"] = g["close"].rolling(50).mean()
+    g["ma200"] = g["close"].rolling(200).mean()
     pc = g["close"].shift(1)
     tr = pd.concat([(g["high"]-g["low"]), (g["high"]-pc).abs(), (g["low"]-pc).abs()], axis=1).max(axis=1)
     g["atr14"] = tr.rolling(14).mean()
+    g["atr_pct"] = 100 * g["atr14"] / g["close"].replace(0, np.nan)
     g["ret5"] = g["close"].pct_change(5)
     g["ret20"] = g["close"].pct_change(20)
     g["ret50"] = g["close"].pct_change(50)
+    g["dollar_volume"] = g["close"] * g["volume"]
     g["avg_vol20"] = g["volume"].rolling(20).mean()
+    g["avg_dollar_volume20"] = g["dollar_volume"].rolling(20).mean()
+    g["median_dollar_volume20"] = g["dollar_volume"].rolling(20).median()
     g["vol_ratio"] = g["volume"] / g["avg_vol20"].replace(0, np.nan)
     g["range5"] = (g["high"].rolling(5).max()-g["low"].rolling(5).min())/g["close"]
     g["range20"] = (g["high"].rolling(20).max()-g["low"].rolling(20).min())/g["close"]
@@ -22,6 +27,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     g["low10"] = g["low"].rolling(10).min()
     g["ma20_slope5"] = g["ema20"].pct_change(5)
     g["ma50_slope10"] = g["ma50"].pct_change(10)
+    g["ma200_slope20"] = g["ma200"].pct_change(20)
     return g
 
 def latest_snapshot(df: pd.DataFrame) -> dict:
