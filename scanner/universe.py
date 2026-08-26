@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import StringIO
 from typing import Iterable, Optional
-from urllib.parse import urlparse, unquote
+from urllib.parse import unquote, urlparse
 
 import pandas as pd
 import requests
@@ -38,6 +38,7 @@ _BROWSER_HEADERS = {
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
+    "Connection": "keep-alive",
 }
 
 
@@ -45,10 +46,43 @@ def _norm_symbol(x: str) -> str:
     return str(x).strip().upper().replace(".", "-")
 
 
-def _extract_symbols_from_tables(html: str, candidate_cols: Iterable[str]) -> list[str]:
+def _clean_symbols(values: Iterable[object]) -> list[str]:
+    bad = {
+        "", "NAN", "NONE", "-", "—", "USD", "CASH_USD",
+        "BLK CSH FND TREASURY SL AGENCY",
+    }
+    vals = [_norm_symbol(x) for x in values]
+    vals = [x for x in vals if x not in bad and 1 <= len(x) <= 10]
+    return sorted(set(vals))
+
+
+def _validate_count(
+    universe_name: str,
+    symbols: list[str],
+    minimum: int,
+    maximum: Optional[int] = None,
+) -> list[str]:
+    n = len(symbols)
+    if n < minimum:
+        raise RuntimeError(
+            f"{universe_name} source returned only {n} symbols; "
+            f"expected at least {minimum}. Source may be blocked, truncated, or changed."
+        )
+    if maximum is not None and n > maximum:
+        raise RuntimeError(
+            f"{universe_name} source returned {n} symbols; "
+            f"expected at most {maximum}. Source format may have changed."
+        )
+    return symbols
+
+
+def _extract_symbols_from_tables(
+    html: str,
+    candidate_cols: Iterable[str],
+) -> list[str]:
     tables = pd.read_html(StringIO(html))
+
     for table in tables:
-        # Flatten a possible MultiIndex header.
         if isinstance(table.columns, pd.MultiIndex):
             table.columns = [
                 " ".join(str(v) for v in col if str(v) != "nan").strip()
@@ -58,13 +92,10 @@ def _extract_symbols_from_tables(html: str, candidate_cols: Iterable[str]) -> li
         normalized = {str(c).strip().lower(): c for c in table.columns}
 
         for wanted in candidate_cols:
-            target = None
             wanted_l = wanted.strip().lower()
+            target = normalized.get(wanted_l)
 
-            if wanted_l in normalized:
-                target = normalized[wanted_l]
-            else:
-                # Allow headers such as "Symbol Ticker".
+            if target is None:
                 for low_name, original in normalized.items():
                     if wanted_l in low_name:
                         target = original
@@ -73,13 +104,9 @@ def _extract_symbols_from_tables(html: str, candidate_cols: Iterable[str]) -> li
             if target is None:
                 continue
 
-            vals = [_norm_symbol(x) for x in table[target].dropna().tolist()]
-            vals = [
-                x for x in vals
-                if x and x not in {"NAN", "NONE", "-", "—"} and len(x) <= 10
-            ]
+            vals = _clean_symbols(table[target].dropna().tolist())
             if len(vals) >= 20:
-                return sorted(set(vals))
+                return vals
 
     raise RuntimeError("Could not find a valid symbol column in downloaded tables")
 
@@ -93,10 +120,10 @@ def _wikipedia_page_title(url: str) -> str:
 
 
 def _wikipedia_html_via_api(article_url: str) -> str:
-    """Use MediaWiki API instead of direct page scraping.
+    """Fetch a Wikipedia article through the MediaWiki API.
 
-    This is intentionally a fallback because Streamlit Cloud / pandas.read_html
-    can receive HTTP 403 responses from direct Wikipedia page requests.
+    This avoids relying only on direct article HTML, which can return HTTP 403
+    from some cloud-hosted environments.
     """
     title = _wikipedia_page_title(article_url)
     api = "https://en.wikipedia.org/w/api.php"
@@ -108,24 +135,24 @@ def _wikipedia_html_via_api(article_url: str) -> str:
         "formatversion": 2,
         "redirects": 1,
     }
+
     r = requests.get(api, params=params, headers=_BROWSER_HEADERS, timeout=30)
     r.raise_for_status()
+
     payload = r.json()
     if "error" in payload:
         raise RuntimeError(f"MediaWiki API error: {payload['error']}")
+
     html = (payload.get("parse") or {}).get("text")
     if not html:
         raise RuntimeError("MediaWiki API returned no page HTML")
+
     return html
 
 
 def _table_symbols(url: str, candidate_cols: Iterable[str]) -> list[str]:
-    """Robust table reader with Streamlit-safe fallbacks.
-
-    1. Browser-like requests GET (instead of pandas fetching the URL itself).
-    2. For Wikipedia, MediaWiki API fallback.
-    """
-    errors = []
+    """Read an HTML constituent table with a Wikipedia API fallback."""
+    errors: list[str] = []
 
     try:
         r = requests.get(url, timeout=30, headers=_BROWSER_HEADERS)
@@ -142,8 +169,7 @@ def _table_symbols(url: str, candidate_cols: Iterable[str]) -> list[str]:
             errors.append(f"MediaWiki API: {exc}")
 
     raise RuntimeError(
-        f"Could not load index constituents from {url}. "
-        + " | ".join(errors)
+        f"Could not load index constituents from {url}. " + " | ".join(errors)
     )
 
 
@@ -153,58 +179,120 @@ def _csv_symbols(url: str, candidate_cols: Iterable[str]) -> list[str]:
     df = pd.read_csv(StringIO(r.text))
 
     normalized = {str(c).strip().lower(): c for c in df.columns}
+
     for wanted in candidate_cols:
         wanted_l = wanted.strip().lower()
         target = normalized.get(wanted_l)
+
         if target is None:
             for low_name, original in normalized.items():
                 if wanted_l in low_name:
                     target = original
                     break
+
         if target is None:
             continue
 
-        vals = [_norm_symbol(x) for x in df[target].dropna().tolist()]
-        vals = [x for x in vals if x and x not in {"NAN", "NONE", "-", "—"}]
+        vals = _clean_symbols(df[target].dropna().tolist())
         if len(vals) >= 20:
-            return sorted(set(vals))
+            return vals
 
     raise RuntimeError(f"Could not find symbol column in CSV: {url}")
 
 
-def _first_success(loaders):
-    errors = []
+def _first_success(
+    loaders,
+    universe_name: str,
+    minimum: int,
+    maximum: Optional[int] = None,
+):
+    errors: list[str] = []
+
     for description, fn in loaders:
         try:
             symbols = fn()
-            if len(symbols) < 20:
-                raise RuntimeError(f"Only {len(symbols)} symbols returned")
+            symbols = _validate_count(
+                universe_name,
+                symbols,
+                minimum=minimum,
+                maximum=maximum,
+            )
             return symbols, description
         except Exception as exc:
             errors.append(f"{description}: {exc}")
-    raise RuntimeError("All universe sources failed. " + " | ".join(errors))
+
+    raise RuntimeError(
+        f"All sources failed for {universe_name}. " + " | ".join(errors)
+    )
 
 
-def _ishares_holdings(url: str) -> list[str]:
-    r = requests.get(url, timeout=30, headers=_BROWSER_HEADERS)
+def _ishares_holdings(
+    product_page_url: str,
+    csv_url: str,
+    universe_name: str,
+    minimum: int,
+    maximum: Optional[int] = None,
+) -> list[str]:
+    """Download current iShares holdings with a browser-like session.
+
+    iShares retired/changed older AJAX download URLs. The current product pages
+    expose stable `latest-holdings.csv` links. A warm-up product-page request
+    also gives the session any cookies expected by the download endpoint.
+    """
+    session = requests.Session()
+    session.headers.update(_BROWSER_HEADERS)
+
+    # Warm up the session. Failure here is non-fatal; the CSV may still work.
+    try:
+        session.get(product_page_url, timeout=20)
+    except Exception:
+        pass
+
+    csv_headers = {
+        **_BROWSER_HEADERS,
+        "Accept": "text/csv,text/plain,*/*",
+        "Referer": product_page_url,
+    }
+
+    r = session.get(csv_url, timeout=45, headers=csv_headers)
     r.raise_for_status()
-    lines = r.text.splitlines()
 
+    lines = r.text.splitlines()
     start = None
     for i, line in enumerate(lines):
-        if line.startswith("Ticker,") or line.startswith('"Ticker"'):
+        stripped = line.lstrip("\ufeff").strip()
+        if stripped.startswith("Ticker,") or stripped.startswith('"Ticker"'):
             start = i
             break
+
     if start is None:
-        raise RuntimeError("Ticker header not found in iShares holdings CSV")
+        raise RuntimeError(
+            f"Ticker header not found in iShares holdings CSV for {universe_name}"
+        )
 
     df = pd.read_csv(StringIO("\n".join(lines[start:])))
     if "Ticker" not in df.columns:
-        raise RuntimeError("Ticker column not found in iShares holdings")
+        raise RuntimeError(
+            f"Ticker column not found in iShares holdings for {universe_name}"
+        )
 
-    vals = [_norm_symbol(x) for x in df["Ticker"].dropna().tolist()]
-    return sorted(
-        set(x for x in vals if x and x not in {"-", "NAN", "CASH_USD"})
+    # Keep actual equity holdings only. This removes cash funds, futures,
+    # collateral and other non-stock rows that can appear in ETF holdings.
+    if "Type" in df.columns:
+        type_mask = df["Type"].astype(str).str.upper().eq("EQUITY")
+        if type_mask.any():
+            df = df[type_mask]
+    elif "Asset Class" in df.columns:
+        class_mask = df["Asset Class"].astype(str).str.upper().eq("EQUITY")
+        if class_mask.any():
+            df = df[class_mask]
+
+    symbols = _clean_symbols(df["Ticker"].dropna().tolist())
+    return _validate_count(
+        universe_name,
+        symbols,
+        minimum=minimum,
+        maximum=maximum,
     )
 
 
@@ -219,112 +307,196 @@ def fetch_universe(name: str) -> UniverseResult:
         )
 
     if name == "S&P 500":
-        syms, source = _first_success([
-            (
-                "GitHub-hosted current constituent CSV",
-                lambda: _csv_symbols(
-                    "https://yfiua.github.io/index-constituents/constituents-sp500.csv",
-                    ["symbol", "ticker"],
+        syms, source = _first_success(
+            [
+                (
+                    "GitHub-hosted current constituent CSV",
+                    lambda: _csv_symbols(
+                        "https://yfiua.github.io/index-constituents/constituents-sp500.csv",
+                        ["symbol", "ticker"],
+                    ),
                 ),
-            ),
-            (
-                "Wikipedia / MediaWiki",
-                lambda: _table_symbols(
-                    "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
-                    ["Symbol", "Ticker"],
+                (
+                    "Wikipedia / MediaWiki",
+                    lambda: _table_symbols(
+                        "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+                        ["Symbol", "Ticker"],
+                    ),
                 ),
-            ),
-        ])
+            ],
+            universe_name=name,
+            minimum=480,
+            maximum=520,
+        )
         return UniverseResult(
-            name, syms, source, "PUBLIC_TABLE",
-            "Uses a GitHub-hosted current snapshot first, with MediaWiki fallback. "
-            "Membership can lag official S&P notices."
+            name,
+            syms,
+            source,
+            "PUBLIC_TABLE",
+            "Current public constituent source with validated membership count; "
+            "may lag official S&P notices.",
         )
 
     if name == "NASDAQ-100":
-        syms, source = _first_success([
-            (
-                "GitHub-hosted current constituent CSV",
-                lambda: _csv_symbols(
-                    "https://yfiua.github.io/index-constituents/constituents-nasdaq100.csv",
-                    ["symbol", "ticker"],
+        syms, source = _first_success(
+            [
+                (
+                    "GitHub-hosted current constituent CSV",
+                    lambda: _csv_symbols(
+                        "https://yfiua.github.io/index-constituents/constituents-nasdaq100.csv",
+                        ["symbol", "ticker"],
+                    ),
                 ),
-            ),
-            (
-                "Wikipedia / MediaWiki",
-                lambda: _table_symbols(
-                    "https://en.wikipedia.org/wiki/Nasdaq-100",
-                    ["Ticker", "Symbol"],
+                (
+                    "Wikipedia / MediaWiki",
+                    lambda: _table_symbols(
+                        "https://en.wikipedia.org/wiki/Nasdaq-100",
+                        ["Ticker", "Symbol"],
+                    ),
                 ),
-            ),
-        ])
+            ],
+            universe_name=name,
+            minimum=95,
+            maximum=110,
+        )
         return UniverseResult(
-            name, syms, source, "PUBLIC_TABLE",
-            "Uses a GitHub-hosted current snapshot first, with MediaWiki fallback."
+            name,
+            syms,
+            source,
+            "PUBLIC_TABLE",
+            "Current public constituent source with validated membership count.",
         )
 
     if name == "S&P MidCap 400":
-        syms = _table_symbols(
-            "https://en.wikipedia.org/wiki/List_of_S%26P_400_companies",
-            ["Symbol", "Ticker"],
+        syms = _validate_count(
+            name,
+            _table_symbols(
+                "https://en.wikipedia.org/wiki/List_of_S%26P_400_companies",
+                ["Symbol", "Ticker"],
+            ),
+            minimum=380,
+            maximum=420,
         )
         return UniverseResult(
-            name, syms, "Wikipedia via browser/MediaWiki fallback", "PUBLIC_TABLE",
-            "Refreshed at scan time; may lag official S&P notices."
+            name,
+            syms,
+            "Wikipedia via browser/MediaWiki fallback",
+            "PUBLIC_TABLE",
+            "Refreshed at scan time with validated membership count; "
+            "may lag official S&P notices.",
         )
 
     if name == "S&P SmallCap 600":
-        syms = _table_symbols(
-            "https://en.wikipedia.org/wiki/List_of_S%26P_600_companies",
-            ["Symbol", "Ticker"],
+        ijr_page = (
+            "https://www.ishares.com/us/products/239774/"
+            "ishares-core-sp-smallcap-etf"
         )
-        return UniverseResult(
-            name, syms, "Wikipedia via browser/MediaWiki fallback", "PUBLIC_TABLE",
-            "Refreshed at scan time; may lag official S&P notices."
+        ijr_csv = (
+            "https://www.ishares.com/us/products/239774/"
+            "ishares-core-s-p-small-cap-etf/latest-holdings.csv"
         )
 
+        syms, source = _first_success(
+            [
+                (
+                    "Wikipedia / MediaWiki exact constituent table",
+                    lambda: _table_symbols(
+                        "https://en.wikipedia.org/wiki/List_of_S%26P_600_companies",
+                        ["Symbol", "Ticker"],
+                    ),
+                ),
+                (
+                    "iShares IJR holdings fallback (S&P SmallCap 600 tracker)",
+                    lambda: _ishares_holdings(
+                        ijr_page,
+                        ijr_csv,
+                        name,
+                        minimum=580,
+                        maximum=700,
+                    ),
+                ),
+            ],
+            universe_name=name,
+            minimum=580,
+            maximum=700,
+        )
+
+        source_type = (
+            "ETF_PROXY" if source.startswith("iShares IJR") else "PUBLIC_TABLE"
+        )
+        note = (
+            "Exact public table is preferred. If it is unavailable, IJR holdings "
+            "are used as a clearly identified S&P SmallCap 600 tracking proxy. "
+            "No silent substitution to All U.S. is allowed."
+        )
+        return UniverseResult(name, syms, source, source_type, note)
+
     if name == "Dow Jones 30":
-        syms, source = _first_success([
-            (
-                "GitHub-hosted current constituent CSV",
-                lambda: _csv_symbols(
-                    "https://yfiua.github.io/index-constituents/constituents-dowjones.csv",
-                    ["symbol", "ticker"],
+        syms, source = _first_success(
+            [
+                (
+                    "GitHub-hosted current constituent CSV",
+                    lambda: _csv_symbols(
+                        "https://yfiua.github.io/index-constituents/constituents-dowjones.csv",
+                        ["symbol", "ticker"],
+                    ),
                 ),
-            ),
-            (
-                "Wikipedia / MediaWiki",
-                lambda: _table_symbols(
-                    "https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average",
-                    ["Symbol", "Ticker"],
+                (
+                    "Wikipedia / MediaWiki",
+                    lambda: _table_symbols(
+                        "https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average",
+                        ["Symbol", "Ticker"],
+                    ),
                 ),
-            ),
-        ])
+            ],
+            universe_name=name,
+            minimum=28,
+            maximum=32,
+        )
         return UniverseResult(
-            name, syms, source, "PUBLIC_TABLE",
-            "Uses a GitHub-hosted current snapshot first, with MediaWiki fallback."
+            name,
+            syms,
+            source,
+            "PUBLIC_TABLE",
+            "Current public constituent source with validated membership count.",
         )
 
     if name == "Russell 2000 (IWM proxy)":
-        url = (
-            "https://www.ishares.com/us/products/239710/ishares-russell-2000-etf/"
-            "1467271812596.ajax?fileType=csv&fileName=IWM_holdings&dataType=fund"
+        page = "https://www.ishares.com/us/products/239710/ishares-russell-2000-etf"
+        csv = page + "/latest-holdings.csv"
+        syms = _ishares_holdings(
+            page,
+            csv,
+            name,
+            minimum=1800,
+            maximum=2100,
         )
-        syms = _ishares_holdings(url)
         return UniverseResult(
-            name, syms, "iShares IWM holdings", "ETF_PROXY",
-            "Practical Russell 2000 proxy; not exact licensed index membership."
+            name,
+            syms,
+            "iShares IWM current latest-holdings.csv",
+            "ETF_PROXY",
+            "Practical Russell 2000 proxy using current IWM equity holdings; "
+            "not exact licensed Russell index membership.",
         )
 
     if name == "Russell 1000 (IWB proxy)":
-        url = (
-            "https://www.ishares.com/us/products/239707/ishares-russell-1000-etf/"
-            "1467271812596.ajax?fileType=csv&fileName=IWB_holdings&dataType=fund"
+        page = "https://www.ishares.com/us/products/239707/ishares-russell-1000-etf"
+        csv = page + "/latest-holdings.csv"
+        syms = _ishares_holdings(
+            page,
+            csv,
+            name,
+            minimum=900,
+            maximum=1100,
         )
-        syms = _ishares_holdings(url)
         return UniverseResult(
-            name, syms, "iShares IWB holdings", "ETF_PROXY",
-            "Practical Russell 1000 proxy; not exact licensed index membership."
+            name,
+            syms,
+            "iShares IWB current latest-holdings.csv",
+            "ETF_PROXY",
+            "Practical Russell 1000 proxy using current IWB equity holdings; "
+            "not exact licensed Russell index membership.",
         )
 
     raise ValueError(f"Unsupported universe: {name}")
