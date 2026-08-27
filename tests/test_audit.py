@@ -19,9 +19,7 @@ class AuditIntegrityTests(unittest.TestCase):
         self.assertEqual(f.loc[3, "% of prior stage"], 20.0)
 
     def test_bucket_reconciliation_includes_wait(self):
-        rows = []
-        for bucket in EXPECTED_BUCKETS:
-            rows.append({"bucket": bucket})
+        rows = [{"bucket": bucket} for bucket in EXPECTED_BUCKETS]
         rows.extend([{"bucket": "WAIT"}, {"bucket": "A-QUALITY — WAIT"}])
         audit = bucket_integrity(pd.DataFrame(rows))
         self.assertTrue(audit["reconciled"])
@@ -40,15 +38,40 @@ class AuditIntegrityTests(unittest.TestCase):
         self.assertIn("MYSTERY", audit["unknown_buckets"])
         self.assertIn("<MISSING>", audit["unknown_buckets"])
 
-    def test_liquidity_summary_cutoff(self):
+    def test_liquidity_summary_cutoff_and_reasons(self):
         df = pd.DataFrame([
-            {"symbol": "A", "prev_dollar_volume": 10_000_000, "passed_liquidity": False},
-            {"symbol": "B", "prev_dollar_volume": 19_500_000, "passed_liquidity": False},
-            {"symbol": "C", "prev_dollar_volume": 20_500_000, "passed_liquidity": True},
-            {"symbol": "D", "prev_dollar_volume": 40_000_000, "passed_liquidity": True},
+            {
+                "symbol": "A",
+                "prev_dollar_volume": 10_000_000,
+                "passed_price": True,
+                "passed_liquidity": False,
+            },
+            {
+                "symbol": "B",
+                "prev_dollar_volume": 19_960_000,
+                "passed_price": True,
+                "passed_liquidity": False,
+            },
+            {
+                "symbol": "C",
+                "prev_dollar_volume": 20_040_000,
+                "passed_price": True,
+                "passed_liquidity": True,
+            },
+            {
+                "symbol": "D",
+                "prev_dollar_volume": 20_100_000,
+                "passed_price": False,
+                "passed_liquidity": False,
+            },
         ])
         s = liquidity_summary(df, 20_000_000)
-        self.assertEqual(list(s["cutoff_sample"]["symbol"][:2]), ["C", "B"])
+        cutoff = s["cutoff_sample"]
+        self.assertEqual(list(cutoff["symbol"][:2]), ["C", "B"])
+        status = dict(zip(cutoff["symbol"], cutoff["liquidity_status"]))
+        self.assertEqual(status["C"], "PASS")
+        self.assertEqual(status["B"], "FAIL — $ VOL")
+        self.assertEqual(status["D"], "FAIL — PRICE")
         self.assertGreater(s["median"], 0)
 
 
