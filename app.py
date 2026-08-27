@@ -15,6 +15,7 @@ import scanner.alpaca_client as alpaca_client_module
 import scanner.audit as audit_module
 import scanner.config as scanner_config
 import scanner.indicators as indicators_module
+import scanner.leadership as leadership_module
 import scanner.regime as regime_module
 import scanner.scoring as scoring_module
 import scanner.universe as universe_module
@@ -23,6 +24,7 @@ for _module in (
     alpaca_client_module,
     scanner_config,
     indicators_module,
+    leadership_module,
     regime_module,
     scoring_module,
     universe_module,
@@ -38,6 +40,7 @@ SECTOR_ETFS = scanner_config.SECTOR_ETFS
 QUALITY_PRESETS = scanner_config.QUALITY_PRESETS
 add_indicators = indicators_module.add_indicators
 latest_snapshot = indicators_module.latest_snapshot
+add_leadership_features = leadership_module.add_leadership_features
 aggregate_regime = regime_module.aggregate_regime
 with_breadth = regime_module.with_breadth
 build_cross_section = scoring_module.build_cross_section
@@ -50,7 +53,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.1.2"
+APP_VERSION = "V1.2.1"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -60,7 +63,11 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Scanner Audit Integrity"
+    "• Trade With Edge • Candidate Quality Engine • Leadership & Resilience"
+)
+st.caption(
+    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.1 Relative Strength & "
+    "Resilience (shadow validation)"
 )
 
 
@@ -469,6 +476,16 @@ if run:
         spy.get("ret50"),
     )
 
+    # V1.2.1 — Leadership & Resilience Engine.
+    # SHADOW MODE by design: the new leadership score is attached and audited,
+    # but does not yet alter eligibility, buckets, or entry decisions.
+    spy_bars = regime_bars[regime_bars["symbol"] == "SPY"].copy()
+    cross_section = add_leadership_features(
+        cross_section,
+        bars,
+        spy_bars,
+    )
+
     history_min_count = (
         int((cross_section["bars"] >= cfg.min_history_bars).sum())
         if cross_section is not None
@@ -482,7 +499,7 @@ if run:
     regime = with_breadth(regime, cross_section)
     deployment_score = regime.get("deployment_score", regime.get("score", 0))
 
-    progress.progress(0.70, text="Applying persistent quality filters...")
+    progress.progress(0.70, text="Auditing leadership, then applying persistent quality filters...")
     eligible, rejected = apply_quality_filters(cross_section, cfg)
 
     progress.progress(
@@ -727,9 +744,37 @@ st.info(
 
 
 # -----------------------------------------------------------------------------
-# 3) Candidate accounting and buckets
+# V1.2.1 Quality Engine — leadership/resilience shadow validation
 # -----------------------------------------------------------------------------
-st.subheader("3) Swing Candidates")
+st.subheader("3) Candidate Quality Engine — Leadership & Resilience")
+st.info(
+    "V1.2.1 SHADOW MODE: Leadership & Resilience is calculated independently "
+    "and displayed for validation. It does NOT yet change persistent-quality "
+    "eligibility, candidate buckets, entry quality, or trade decisions."
+)
+
+lead_valid = scored["leadership_score"].dropna() if "leadership_score" in scored.columns else pd.Series(dtype=float)
+if not lead_valid.empty:
+    q1, q2, q3, q4 = st.columns(4)
+    q1.metric("Leadership median", f"{lead_valid.median():.1f}/100")
+    q2.metric("A / A+ leadership", f"{int((lead_valid >= 80).sum()):,}")
+    q3.metric("Elite A+ ≥90", f"{int((lead_valid >= 90).sum()):,}")
+    high_conf = (
+        int((scored["leadership_confidence"] == "HIGH").sum())
+        if "leadership_confidence" in scored.columns
+        else 0
+    )
+    q4.metric("High-confidence reads", f"{high_conf:,}/{len(scored):,}")
+
+    st.caption(
+        "Leadership composite: 30% RS20 + 25% RS50 + 15% RS acceleration + "
+        "20% SPY-pullback resilience + 10% RS-line proximity to its 100D high."
+    )
+
+# -----------------------------------------------------------------------------
+# 4) Candidate accounting and buckets
+# -----------------------------------------------------------------------------
+st.subheader("4) Swing Candidates")
 
 if scored is None or scored.empty:
     st.warning(
@@ -780,8 +825,15 @@ cols = [
     "bucket",
     "setup",
     "quality_score",
+    "leadership_score",
+    "leadership_grade",
     "entry_score",
     "rs_score",
+    "rs_vs_spy_20_pct",
+    "rs_vs_spy_50_pct",
+    "stress_outperform_pct",
+    "rs_line_high_gap_pct",
+    "leadership_confidence",
     "close",
     "atr_pct",
     "avg_dollar_volume20",
@@ -809,20 +861,67 @@ st.dataframe(
 # -----------------------------------------------------------------------------
 # 4) Candidate detail
 # -----------------------------------------------------------------------------
-st.subheader("4) Candidate Detail")
+st.subheader("5) Candidate Detail")
 
 sel = st.selectbox("Symbol", scored["symbol"].head(100).tolist())
 row = scored[scored["symbol"] == sel].iloc[0]
 symbol_bars = res["bars"][res["bars"]["symbol"] == sel]
 
-m1, m2, m3, m4 = st.columns(4)
+m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("Candidate Quality", f'{row["quality_score"]:.1f}/100')
-m2.metric("Entry Quality", f'{row["entry_score"]:.1f}/100')
-m3.metric("RS", f'{row["rs_score"]:.1f} %ile')
-m4.metric("Decision", row["decision"])
+m2.metric(
+    "Leadership (shadow)",
+    f'{row.get("leadership_score", float("nan")):.1f}/100'
+    if pd.notna(row.get("leadership_score"))
+    else "—",
+)
+m3.metric("Entry Quality", f'{row["entry_score"]:.1f}/100')
+m4.metric("Legacy RS", f'{row["rs_score"]:.1f} %ile')
+m5.metric("Decision", row["decision"])
 
 st.write(f'**Why quality:** {row.get("quality_reasons", "") or "—"}')
 st.write(f'**Why entry:** {row.get("entry_reasons", "") or "—"}')
+
+with st.expander("V1.2.1 Leadership & Resilience", expanded=True):
+    l1, l2, l3, l4, l5, l6 = st.columns(6)
+    l1.metric("Leadership grade", row.get("leadership_grade", "N/A"))
+    l2.metric(
+        "RS vs SPY • 20D",
+        f'{row.get("rs_vs_spy_20_pct", float("nan")):+.1f}%'
+        if pd.notna(row.get("rs_vs_spy_20_pct"))
+        else "—",
+    )
+    l3.metric(
+        "RS vs SPY • 50D",
+        f'{row.get("rs_vs_spy_50_pct", float("nan")):+.1f}%'
+        if pd.notna(row.get("rs_vs_spy_50_pct"))
+        else "—",
+    )
+    l4.metric(
+        "Stress-day outperform",
+        f'{row.get("stress_outperform_pct", float("nan")):.0f}%'
+        if pd.notna(row.get("stress_outperform_pct"))
+        else "—",
+    )
+    l5.metric(
+        "RS line vs 100D high",
+        f'{row.get("rs_line_high_gap_pct", float("nan")):.1f}%'
+        if pd.notna(row.get("rs_line_high_gap_pct"))
+        else "—",
+    )
+    l6.metric("Data confidence", row.get("leadership_confidence", "LOW"))
+
+    st.write(
+        f'**Leadership strengths:** '
+        f'{row.get("leadership_reasons", "") or "—"}'
+    )
+    if row.get("leadership_risks"):
+        st.warning("Leadership watch-outs: " + str(row["leadership_risks"]))
+    st.caption(
+        f'Stress sessions used: {int(row.get("stress_day_count", 0) or 0)} • '
+        f'Mode: {row.get("stress_mode", "—")} • '
+        "Shadow-mode score does not yet alter candidate classification."
+    )
 
 if row["chase_reasons"]:
     st.warning("Anti-chase gate: " + row["chase_reasons"])
