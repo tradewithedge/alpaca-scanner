@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 
-LEADERSHIP_VERSION = "V1.2.1"
+LEADERSHIP_VERSION = "V1.2.1.1"
 
 
 def _percentile_rank(series: pd.Series) -> pd.Series:
@@ -72,11 +72,33 @@ def _symbol_leadership_features(
 
     rel20 = _safe_relative_return(z["relative_line"], 20)
     rel50 = _safe_relative_return(z["relative_line"], 50)
+    rel100 = _safe_relative_return(z["relative_line"], 100)
 
-    # Relative-strength acceleration compares the latest 20-session relative
-    # move with the immediately preceding 20-session relative move.
-    rel20_prev = np.nan
+    # Interpretability view: compare today's 20-session RS with the same
+    # 20-session RS calculation as of 10 trading sessions ago.
     ratio = z["relative_line"].dropna()
+    rel20_10d_ago = np.nan
+    if len(ratio) >= 31:
+        old_base = float(ratio.iloc[-31])
+        old_last = float(ratio.iloc[-11])
+        if (
+            np.isfinite(old_base)
+            and np.isfinite(old_last)
+            and old_base > 0
+        ):
+            rel20_10d_ago = old_last / old_base - 1.0
+
+    rs20_change_10d = (
+        rel20 - rel20_10d_ago
+        if np.isfinite(rel20) and np.isfinite(rel20_10d_ago)
+        else np.nan
+    )
+
+    # Legacy scoring acceleration is intentionally retained so V1.2.1.1 does
+    # not change the already-validated shadow Leadership Score distribution.
+    # It compares the latest 20-session relative move with the immediately
+    # preceding 20-session relative move.
+    rel20_prev = np.nan
     if len(ratio) >= 41:
         start = float(ratio.iloc[-41])
         end = float(ratio.iloc[-21])
@@ -120,12 +142,14 @@ def _symbol_leadership_features(
     if stress.empty:
         stress_excess_mean = np.nan
         stress_outperform = np.nan
+        stress_win_count = 0
         downside_capture = np.nan
         stress_count = 0
     else:
         stress["excess"] = stress["stock_ret1"] - stress["benchmark_ret1"]
         stress_excess_mean = float(stress["excess"].mean())
-        stress_outperform = float((stress["excess"] > 0).mean())
+        stress_win_count = int((stress["excess"] > 0).sum())
+        stress_outperform = float(stress_win_count / len(stress))
 
         benchmark_down = float(
             (-stress["benchmark_ret1"].clip(upper=0)).sum()
@@ -146,15 +170,48 @@ def _symbol_leadership_features(
     else:
         confidence = "LOW"
 
+    rs_line_index = (
+        100.0 * (1.0 + rs_high_gap)
+        if np.isfinite(rs_high_gap)
+        else np.nan
+    )
+
+    if np.isfinite(downside_capture):
+        capture_pct = 100.0 * downside_capture
+        if capture_pct <= 70:
+            capture_label = "EXCELLENT"
+        elif capture_pct <= 90:
+            capture_label = "GOOD"
+        elif capture_pct <= 110:
+            capture_label = "MARKET-LIKE"
+        elif capture_pct <= 120:
+            capture_label = "WEAKENING"
+        else:
+            capture_label = "POOR"
+        capture_plain_english = (
+            f"On selected SPY stress days, the stock lost about "
+            f"{downside_capture:.2f}× as much as SPY in aggregate."
+        )
+    else:
+        capture_label = "N/A"
+        capture_plain_english = "Insufficient stress data for downside capture."
+
     return {
         "leadership_aligned_bars": aligned,
         "rs_vs_spy_20": rel20,
         "rs_vs_spy_50": rel50,
+        "rs_vs_spy_100": rel100,
+        "rs20_10d_ago": rel20_10d_ago,
+        "rs20_change_10d": rs20_change_10d,
         "rs_accel": rs_accel,
         "rs_line_high_gap": rs_high_gap,
+        "rs_line_index": rs_line_index,
         "stress_excess_mean": stress_excess_mean,
         "stress_outperform_rate": stress_outperform,
+        "stress_win_count": stress_win_count,
         "downside_capture": downside_capture,
+        "downside_capture_label": capture_label,
+        "downside_capture_plain_english": capture_plain_english,
         "stress_day_count": stress_count,
         "stress_mode": stress_mode,
         "leadership_confidence": confidence,
@@ -178,55 +235,110 @@ def _grade(score: float | int | None) -> str:
     return "D"
 
 
+def _fmt_signed_pct(value) -> str:
+    if value is None or pd.isna(value):
+        return "—"
+    return f"{100.0 * float(value):+.1f}%"
+
+
+def _fmt_signed_pp(value) -> str:
+    if value is None or pd.isna(value):
+        return "—"
+    return f"{100.0 * float(value):+.1f}pp"
+
+
 def _explain(row: pd.Series) -> tuple[str, str]:
     reasons = []
     risks = []
 
-    if row.get("leadership_score", 0) >= 90:
-        reasons.append("elite cross-sectional leadership")
-    elif row.get("leadership_score", 0) >= 80:
-        reasons.append("strong cross-sectional leadership")
+    score = row.get("leadership_score")
+    if pd.notna(score):
+        if float(score) >= 90:
+            reasons.append(f"elite leadership score {float(score):.1f}/100")
+        elif float(score) >= 80:
+            reasons.append(f"strong leadership score {float(score):.1f}/100")
 
-    if row.get("lead_rs20_pct", 0) >= 80:
-        reasons.append("RS20 top quintile")
-    if row.get("lead_rs50_pct", 0) >= 80:
-        reasons.append("RS50 top quintile")
+    rel20 = row.get("rs_vs_spy_20")
+    rel50 = row.get("rs_vs_spy_50")
+    rel100 = row.get("rs_vs_spy_100")
+    if pd.notna(rel20):
+        reasons.append(f"20D vs SPY {_fmt_signed_pct(rel20)}")
+    if pd.notna(rel50):
+        reasons.append(f"50D vs SPY {_fmt_signed_pct(rel50)}")
+    if pd.notna(rel100):
+        reasons.append(f"100D vs SPY {_fmt_signed_pct(rel100)}")
 
+    old_rs20 = row.get("rs20_10d_ago")
+    now_rs20 = row.get("rs_vs_spy_20")
+    rs20_change = row.get("rs20_change_10d")
+    if pd.notna(old_rs20) and pd.notna(now_rs20) and pd.notna(rs20_change):
+        phrase = (
+            f"RS20 changed from {_fmt_signed_pct(old_rs20)} to "
+            f"{_fmt_signed_pct(now_rs20)} over 10 sessions "
+            f"({_fmt_signed_pp(rs20_change)})"
+        )
+        if float(rs20_change) >= 0.01:
+            reasons.append("accelerating: " + phrase)
+        elif float(rs20_change) <= -0.01:
+            risks.append("decelerating: " + phrase)
+        else:
+            reasons.append("stable momentum: " + phrase)
+
+    stress_count = int(row.get("stress_day_count", 0) or 0)
+    stress_wins = int(row.get("stress_win_count", 0) or 0)
     stress_rate = row.get("stress_outperform_rate")
-    if pd.notna(stress_rate):
-        if stress_rate >= 0.65:
-            reasons.append(
-                f"outperformed SPY on {100 * stress_rate:.0f}% of stress days"
+    stress_excess = row.get("stress_excess_mean")
+    if stress_count > 0 and pd.notna(stress_rate):
+        stress_text = (
+            f"beat SPY on {stress_wins}/{stress_count} stress sessions "
+            f"({100.0 * float(stress_rate):.0f}%)"
+        )
+        if pd.notna(stress_excess):
+            stress_text += (
+                f"; average excess return "
+                f"{100.0 * float(stress_excess):+.2f}%"
             )
-        elif stress_rate < 0.40:
-            risks.append(
-                f"outperformed SPY on only {100 * stress_rate:.0f}% of stress days"
-            )
+
+        if float(stress_rate) >= 0.65:
+            reasons.append(stress_text)
+        elif float(stress_rate) < 0.40:
+            risks.append(stress_text)
+        else:
+            reasons.append("mixed stress resilience: " + stress_text)
 
     high_gap = row.get("rs_line_high_gap")
-    if pd.notna(high_gap):
-        if high_gap >= -0.02:
-            reasons.append("RS line near 100D high")
-        elif high_gap < -0.06:
-            risks.append(f"RS line {100 * abs(high_gap):.1f}% below 100D high")
-
-    accel = row.get("rs_accel")
-    if pd.notna(accel):
-        if accel > 0.01:
-            reasons.append("relative momentum accelerating")
-        elif accel < -0.01:
-            risks.append("relative momentum decelerating")
+    rs_index = row.get("rs_line_index")
+    if pd.notna(high_gap) and pd.notna(rs_index):
+        rs_line_text = (
+            f"RS-line index {float(rs_index):.1f}/100 "
+            f"({100.0 * abs(float(high_gap)):.1f}% below its 100D peak)"
+        )
+        if float(high_gap) >= -0.02:
+            reasons.append(rs_line_text)
+        elif float(high_gap) < -0.06:
+            risks.append(rs_line_text)
+        else:
+            reasons.append(rs_line_text)
 
     capture = row.get("downside_capture")
+    capture_label = row.get("downside_capture_label", "N/A")
     if pd.notna(capture):
-        if capture <= 0.70:
-            reasons.append("low downside capture on SPY stress days")
-        elif capture >= 1.20:
-            risks.append("high downside capture on SPY stress days")
+        capture_text = (
+            f"downside capture {100.0 * float(capture):.0f}% "
+            f"({capture_label}); stock lost about "
+            f"{float(capture):.2f}× as much as SPY on stress days"
+        )
+        if float(capture) <= 0.70:
+            reasons.append(capture_text)
+        elif float(capture) >= 1.20:
+            risks.append(capture_text)
+        else:
+            reasons.append(capture_text)
 
     if row.get("leadership_confidence") != "HIGH":
         risks.append(
-            f"leadership data confidence {row.get('leadership_confidence', 'LOW')}"
+            f"Leadership Data Confidence "
+            f"{row.get('leadership_confidence', 'LOW')}"
         )
 
     return ", ".join(reasons), "; ".join(risks)
@@ -341,6 +453,9 @@ def add_leadership_features(
     for raw, display in [
         ("rs_vs_spy_20", "rs_vs_spy_20_pct"),
         ("rs_vs_spy_50", "rs_vs_spy_50_pct"),
+        ("rs_vs_spy_100", "rs_vs_spy_100_pct"),
+        ("rs20_10d_ago", "rs20_10d_ago_pct"),
+        ("rs20_change_10d", "rs20_change_10d_pp"),
         ("rs_accel", "rs_accel_pct"),
         ("rs_line_high_gap", "rs_line_high_gap_pct"),
         ("stress_excess_mean", "stress_excess_mean_pct"),
