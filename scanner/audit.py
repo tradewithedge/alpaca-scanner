@@ -22,12 +22,7 @@ def _rate(numerator: int | float, denominator: int | float | None) -> float | No
 
 
 def build_funnel(stages: Iterable[tuple[str, int]]) -> pd.DataFrame:
-    """Build an auditable stage-by-stage scanner funnel.
-
-    Each stage must be a non-negative integer count. Rates are intentionally
-    computed against both the previous stage and the first stage so silent
-    drop-offs are obvious in the UI.
-    """
+    """Build an auditable stage-by-stage scanner funnel."""
     rows = []
     first_count = None
     previous_count = None
@@ -88,6 +83,15 @@ def bucket_integrity(scored: pd.DataFrame | None) -> dict:
     }
 
 
+def _liquidity_status(row: pd.Series) -> str:
+    """Explain why a boundary row passed/failed."""
+    if bool(row.get("passed_liquidity", False)):
+        return "PASS"
+    if not bool(row.get("passed_price", False)):
+        return "FAIL — PRICE"
+    return "FAIL — $ VOL"
+
+
 def liquidity_summary(observations: pd.DataFrame, threshold: float) -> dict:
     """Summarize consolidated previous-session dollar-volume observations."""
     if observations is None or observations.empty:
@@ -109,9 +113,12 @@ def liquidity_summary(observations: pd.DataFrame, threshold: float) -> dict:
         q75 = float(dv.quantile(0.75))
 
     x["distance_to_cutoff"] = (x["prev_dollar_volume"] - float(threshold)).abs()
-    x["liquidity_status"] = x["passed_liquidity"].map({True: "PASS", False: "FAIL"})
+    x["liquidity_status"] = x.apply(_liquidity_status, axis=1)
     cutoff_sample = (
-        x.sort_values(["distance_to_cutoff", "prev_dollar_volume"], ascending=[True, False])
+        x.sort_values(
+            ["distance_to_cutoff", "prev_dollar_volume"],
+            ascending=[True, False],
+        )
         .head(12)
         .drop(columns=["distance_to_cutoff"], errors="ignore")
         .reset_index(drop=True)
