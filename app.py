@@ -127,6 +127,13 @@ def _money_m(value):
     return f"${float(value) / 1_000_000:,.1f}M"
 
 
+def _money_m2(value):
+    """Two-decimal $M formatter for audit-boundary precision."""
+    if value is None or pd.isna(value):
+        return "—"
+    return f"${float(value) / 1_000_000:,.2f}M"
+
+
 def _pct(numerator, denominator):
     if not denominator:
         return 0.0
@@ -162,6 +169,17 @@ def liquid_universe(client, cfg, selected_symbols=None):
             continue
 
         valid.append(symbol)
+
+    # Audit named-universe membership explicitly. No silent disappearance:
+    # list source-universe symbols that did not match an active/tradable Alpaca
+    # U.S. equity after the same canonical-symbol normalization used above.
+    if selected_symbols:
+        matched_keys = {_symbol_key(s) for s in valid}
+        unmatched_symbols = [
+            s for s in selected_symbols if _symbol_key(s) not in matched_keys
+        ]
+    else:
+        unmatched_symbols = []
 
     prev_bars = load_prev_daily_bars(
         client,
@@ -225,6 +243,7 @@ def liquid_universe(client, cfg, selected_symbols=None):
     diag = liquidity_summary(obs, cfg.min_prev_dollar_volume)
     audit = {
         "matched_count": len(valid),
+        "unmatched_symbols": unmatched_symbols,
         "sip_bar_count": len(prev_bars),
         "usable_sip_count": len(obs),
         "missing_sip_count": max(len(valid) - len(prev_bars), 0),
@@ -437,7 +456,6 @@ if run:
     except Exception as exc:
         st.error(f"Deep historical SIP scan failed. Details: {exc}")
         st.stop()
-
     history_returned_count = (
         int(bars["symbol"].nunique())
         if bars is not None and not bars.empty and "symbol" in bars.columns
@@ -604,6 +622,22 @@ with st.expander("🔎 Scanner Audit Integrity", expanded=True):
     d4.metric("Prev $Vol median", _money_m(liq["median"]))
     d5.metric("Prev $Vol P75", _money_m(liq["q75"]))
 
+    unmatched = liq.get("unmatched_symbols", [])
+    if unmatched:
+        with st.expander(
+            f"Unmatched universe symbols ({len(unmatched):,})",
+            expanded=False,
+        ):
+            st.caption(
+                "These source-universe symbols did not match an active/tradable "
+                "Alpaca U.S. equity after canonical symbol normalization."
+            )
+            st.dataframe(
+                pd.DataFrame({"symbol": unmatched}),
+                use_container_width=True,
+                hide_index=True,
+            )
+
     cutoff = liq["cutoff_sample"]
     if cutoff is not None and not cutoff.empty:
         st.caption(
@@ -620,14 +654,17 @@ with st.expander("🔎 Scanner Audit Integrity", expanded=True):
                 "liquidity_status",
             ]
         ].copy()
-        cutoff_view["snapshot_price"] = cutoff_view["snapshot_price"].map(
+        cutoff_view = cutoff_view.rename(
+            columns={"snapshot_price": "prev_close"}
+        )
+        cutoff_view["prev_close"] = cutoff_view["prev_close"].map(
             lambda x: f"${x:,.2f}"
         )
         cutoff_view["previous_volume"] = cutoff_view["previous_volume"].map(
             lambda x: f"{x:,.0f}"
         )
         cutoff_view["prev_dollar_volume"] = cutoff_view["prev_dollar_volume"].map(
-            _money_m
+            _money_m2
         )
         st.dataframe(cutoff_view, use_container_width=True, hide_index=True)
 
