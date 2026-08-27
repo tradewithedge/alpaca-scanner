@@ -53,7 +53,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.1"
+APP_VERSION = "V1.2.1.1"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -63,11 +63,11 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Leadership & Resilience"
+    "• Trade With Edge • Candidate Quality Engine • Leadership Interpretability Polish"
 )
 st.caption(
-    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.1 Relative Strength & "
-    "Resilience (shadow validation)"
+    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.1.1 Leadership "
+    "Interpretability Polish (shadow validation)"
 )
 
 
@@ -746,9 +746,9 @@ st.info(
 # -----------------------------------------------------------------------------
 # V1.2.1 Quality Engine — leadership/resilience shadow validation
 # -----------------------------------------------------------------------------
-st.subheader("3) Candidate Quality Engine — Leadership & Resilience")
+st.subheader("3) Candidate Quality Engine — Leadership & Resilience (Explainable)")
 st.info(
-    "V1.2.1 SHADOW MODE: Leadership & Resilience is calculated independently "
+    "V1.2.1.1 SHADOW MODE: Leadership & Resilience is calculated independently "
     "and displayed for validation. It does NOT yet change persistent-quality "
     "eligibility, candidate buckets, entry quality, or trade decisions."
 )
@@ -764,7 +764,7 @@ if not lead_valid.empty:
         if "leadership_confidence" in scored.columns
         else 0
     )
-    q4.metric("High-confidence reads", f"{high_conf:,}/{len(scored):,}")
+    q4.metric("High Leadership Data Confidence", f"{high_conf:,}/{len(scored):,}")
 
     st.caption(
         "Leadership composite: 30% RS20 + 25% RS50 + 15% RS acceleration + "
@@ -831,7 +831,16 @@ cols = [
     "rs_score",
     "rs_vs_spy_20_pct",
     "rs_vs_spy_50_pct",
+    "rs_vs_spy_100_pct",
+    "rs20_10d_ago_pct",
+    "rs20_change_10d_pp",
+    "stress_win_count",
+    "stress_day_count",
     "stress_outperform_pct",
+    "stress_excess_mean_pct",
+    "downside_capture_pct",
+    "downside_capture_label",
+    "rs_line_index",
     "rs_line_high_gap_pct",
     "leadership_confidence",
     "close",
@@ -882,34 +891,124 @@ m5.metric("Decision", row["decision"])
 st.write(f'**Why quality:** {row.get("quality_reasons", "") or "—"}')
 st.write(f'**Why entry:** {row.get("entry_reasons", "") or "—"}')
 
-with st.expander("V1.2.1 Leadership & Resilience", expanded=True):
-    l1, l2, l3, l4, l5, l6 = st.columns(6)
+with st.expander("V1.2.1.1 Leadership & Resilience — Explainable View", expanded=True):
+    st.markdown("#### Relative leadership")
+    l1, l2, l3, l4, l5 = st.columns(5)
     l1.metric("Leadership grade", row.get("leadership_grade", "N/A"))
     l2.metric(
         "RS vs SPY • 20D",
         f'{row.get("rs_vs_spy_20_pct", float("nan")):+.1f}%'
         if pd.notna(row.get("rs_vs_spy_20_pct"))
         else "—",
+        help="Stock return relative to SPY over the latest 20 trading sessions.",
     )
     l3.metric(
         "RS vs SPY • 50D",
         f'{row.get("rs_vs_spy_50_pct", float("nan")):+.1f}%'
         if pd.notna(row.get("rs_vs_spy_50_pct"))
         else "—",
+        help="Intermediate-term relative performance versus SPY.",
     )
     l4.metric(
-        "Stress-day outperform",
-        f'{row.get("stress_outperform_pct", float("nan")):.0f}%'
-        if pd.notna(row.get("stress_outperform_pct"))
+        "RS vs SPY • 100D",
+        f'{row.get("rs_vs_spy_100_pct", float("nan")):+.1f}%'
+        if pd.notna(row.get("rs_vs_spy_100_pct"))
         else "—",
+        help="Longer-term leadership context. Display-only in V1.2.1.1; it does not change the validated Leadership Score.",
     )
     l5.metric(
-        "RS line vs 100D high",
-        f'{row.get("rs_line_high_gap_pct", float("nan")):.1f}%'
-        if pd.notna(row.get("rs_line_high_gap_pct"))
+        "Leadership Data Confidence",
+        row.get("leadership_confidence", "LOW"),
+        help="Confidence in the leadership calculation, not confidence in the trade.",
+    )
+
+    st.markdown("#### Relative momentum change")
+    old_rs20 = row.get("rs20_10d_ago_pct")
+    new_rs20 = row.get("rs_vs_spy_20_pct")
+    change_pp = row.get("rs20_change_10d_pp")
+
+    if pd.notna(old_rs20) and pd.notna(new_rs20) and pd.notna(change_pp):
+        if change_pp >= 1.0:
+            momentum_state = "ACCELERATING"
+        elif change_pp <= -1.0:
+            momentum_state = "DECELERATING"
+        else:
+            momentum_state = "STABLE"
+
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric("RS20 • 10 sessions ago", f"{old_rs20:+.1f}%")
+        a2.metric("RS20 • now", f"{new_rs20:+.1f}%")
+        a3.metric("10-session change", f"{change_pp:+.1f}pp")
+        a4.metric("Momentum state", momentum_state)
+
+        st.caption(
+            f"Interpretation: 20-day relative performance versus SPY moved "
+            f"from {old_rs20:+.1f}% to {new_rs20:+.1f}% over the latest "
+            f"10 trading sessions ({change_pp:+.1f} percentage points)."
+        )
+    else:
+        st.caption("Insufficient aligned data for the 10-session RS20 comparison.")
+
+    st.markdown("#### Market-stress resilience")
+    stress_days = int(row.get("stress_day_count", 0) or 0)
+    stress_wins = int(row.get("stress_win_count", 0) or 0)
+    stress_rate = row.get("stress_outperform_pct")
+    stress_excess = row.get("stress_excess_mean_pct")
+    capture_pct = row.get("downside_capture_pct")
+    capture_label = row.get("downside_capture_label", "N/A")
+
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("SPY stress sessions", f"{stress_days}")
+    s2.metric(
+        "Beat SPY on stress days",
+        f"{stress_wins}/{stress_days} ({stress_rate:.0f}%)"
+        if stress_days and pd.notna(stress_rate)
         else "—",
     )
-    l6.metric("Data confidence", row.get("leadership_confidence", "LOW"))
+    s3.metric(
+        "Avg excess return vs SPY",
+        f"{stress_excess:+.2f}%"
+        if pd.notna(stress_excess)
+        else "—",
+    )
+    s4.metric(
+        "Downside capture",
+        f"{capture_pct:.0f}% — {capture_label}"
+        if pd.notna(capture_pct)
+        else "—",
+    )
+
+    if pd.notna(capture_pct):
+        st.caption(
+            f"Downside-capture interpretation: on the selected SPY stress "
+            f"sessions, this stock lost about {capture_pct / 100.0:.2f}× "
+            f"as much as SPY in aggregate. Below 100% means better downside "
+            f"resilience than SPY; above 100% means worse."
+        )
+
+    st.markdown("#### Relative-strength line")
+    rs_index = row.get("rs_line_index")
+    rs_gap = row.get("rs_line_high_gap_pct")
+    r1, r2 = st.columns(2)
+    r1.metric(
+        "RS-line index vs 100D peak",
+        f"{rs_index:.1f}/100"
+        if pd.notna(rs_index)
+        else "—",
+        help="100 means the stock/SPY relative-strength line is at its 100-day peak.",
+    )
+    r2.metric(
+        "Distance below 100D RS peak",
+        f"{abs(rs_gap):.1f}%"
+        if pd.notna(rs_gap)
+        else "—",
+    )
+    if pd.notna(rs_index) and pd.notna(rs_gap):
+        st.caption(
+            f"Interpretation: the stock/SPY relative-strength line is currently "
+            f"{rs_index:.1f}/100, which is {abs(rs_gap):.1f}% below its best "
+            f"relative level of the last 100 trading sessions."
+        )
 
     st.write(
         f'**Leadership strengths:** '
@@ -917,10 +1016,11 @@ with st.expander("V1.2.1 Leadership & Resilience", expanded=True):
     )
     if row.get("leadership_risks"):
         st.warning("Leadership watch-outs: " + str(row["leadership_risks"]))
+
     st.caption(
-        f'Stress sessions used: {int(row.get("stress_day_count", 0) or 0)} • '
-        f'Mode: {row.get("stress_mode", "—")} • '
-        "Shadow-mode score does not yet alter candidate classification."
+        f'Stress mode: {row.get("stress_mode", "—")} • '
+        "THRESHOLD means genuine SPY ≤ -1% sessions were available. "
+        "Shadow-mode score still does not alter candidate classification."
     )
 
 if row["chase_reasons"]:
