@@ -1,3 +1,4 @@
+import importlib
 import os
 from datetime import datetime, timezone
 
@@ -5,33 +6,61 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from scanner.alpaca_client import AlpacaClient, AlpacaCredentials
-
-# Streamlit hot-reload guard: force scanner.config to refresh after multi-file GitHub updates.
-import importlib
+# -----------------------------------------------------------------------------
+# Streamlit multi-file hot-reload guard.
+# Reload the scanner package modules in dependency order so a GitHub deploy
+# cannot leave app.py running against stale dataclasses / scoring functions.
+# -----------------------------------------------------------------------------
+import scanner.alpaca_client as alpaca_client_module
+import scanner.audit as audit_module
 import scanner.config as scanner_config
+import scanner.indicators as indicators_module
+import scanner.regime as regime_module
+import scanner.scoring as scoring_module
+import scanner.universe as universe_module
 
-scanner_config = importlib.reload(scanner_config)
+for _module in (
+    alpaca_client_module,
+    scanner_config,
+    indicators_module,
+    regime_module,
+    scoring_module,
+    universe_module,
+    audit_module,
+):
+    importlib.reload(_module)
+
+AlpacaClient = alpaca_client_module.AlpacaClient
+AlpacaCredentials = alpaca_client_module.AlpacaCredentials
 ScannerConfig = scanner_config.ScannerConfig
 MARKET_SYMBOLS = scanner_config.MARKET_SYMBOLS
 SECTOR_ETFS = scanner_config.SECTOR_ETFS
 QUALITY_PRESETS = scanner_config.QUALITY_PRESETS
+add_indicators = indicators_module.add_indicators
+latest_snapshot = indicators_module.latest_snapshot
+aggregate_regime = regime_module.aggregate_regime
+with_breadth = regime_module.with_breadth
+build_cross_section = scoring_module.build_cross_section
+apply_quality_filters = scoring_module.apply_quality_filters
+score_universe = scoring_module.score_universe
+UNIVERSE_OPTIONS = universe_module.UNIVERSE_OPTIONS
+fetch_universe = universe_module.fetch_universe
+build_funnel = audit_module.build_funnel
+bucket_integrity = audit_module.bucket_integrity
+liquidity_summary = audit_module.liquidity_summary
 
-from scanner.indicators import add_indicators, latest_snapshot
-from scanner.regime import aggregate_regime, with_breadth
-from scanner.scoring import build_cross_section, apply_quality_filters, score_universe
-from scanner.universe import UNIVERSE_OPTIONS, fetch_universe
 
+APP_VERSION = "V1.1.2"
 
 st.set_page_config(
-    page_title="ALPACA Scanner V1.1.1",
+    page_title=f"ALPACA Scanner {APP_VERSION}",
     page_icon="📈",
     layout="wide",
 )
-st.title("📈 ALPACA Scanner V1.1.1")
+st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge"
+    "• Trade With Edge • Scanner Audit Integrity"
 )
 
 
@@ -61,9 +90,7 @@ def get_client():
                 "APCA_DATA_BASE_URL",
                 "https://data.alpaca.markets",
             ),
-            # Latest/snapshot feed. 15-minute delayed SIP is consolidated.
             feed=secret("APCA_DATA_FEED", "delayed_sip"),
-            # Historical SIP is queried only with an end >=20 minutes old.
             historical_feed=secret("APCA_HISTORICAL_FEED", "sip"),
         )
     )
@@ -90,16 +117,28 @@ def load_named_universe(name):
 
 
 def _symbol_key(symbol):
-    """Canonical comparison key for external index/ETF tickers vs Alpaca assets.
-
-    Examples:
-    MOG.A, MOG-A, MOGA -> MOGA
-    BRK.B, BRK-B, BRKB -> BRKB
-    """
+    """Canonical comparison key for external index/ETF vs Alpaca tickers."""
     return "".join(ch for ch in str(symbol).upper().strip() if ch.isalnum())
 
 
+def _money_m(value):
+    if value is None or pd.isna(value):
+        return "—"
+    return f"${float(value) / 1_000_000:,.1f}M"
+
+
+def _pct(numerator, denominator):
+    if not denominator:
+        return 0.0
+    return 100.0 * float(numerator) / float(denominator)
+
+
 def liquid_universe(client, cfg, selected_symbols=None):
+    """Apply Alpaca tradability + completed-session consolidated SIP gates.
+
+    Returns the deep-scan selection plus a complete audit dictionary. The audit
+    keeps the *true* liquidity-pass count separate from the deep-scan cap.
+    """
     selected_keys = (
         {_symbol_key(s) for s in selected_symbols}
         if selected_symbols
@@ -124,20 +163,18 @@ def liquid_universe(client, cfg, selected_symbols=None):
 
         valid.append(symbol)
 
-    # CRITICAL DATA-INTEGRITY RULE:
-    # Never use IEX-only volume for a consolidated dollar-liquidity threshold.
-    # Pull the last fully completed daily bar from historical SIP instead.
     prev_bars = load_prev_daily_bars(
         client,
         tuple(valid),
         cfg.snapshot_batch_size,
     )
 
-    rows = []
+    observations = []
     for symbol in valid:
         bar = prev_bars.get(symbol) or {}
         px = bar.get("c")
         vol = bar.get("v")
+        bar_ts = bar.get("t")
 
         if px is None or vol is None:
             continue
@@ -148,37 +185,60 @@ def liquid_universe(client, cfg, selected_symbols=None):
         except Exception:
             continue
 
+        if px <= 0 or vol < 0:
+            continue
+
         dollar_volume = px * vol
+        passed_price = px >= cfg.min_price
+        passed_liquidity = passed_price and dollar_volume >= cfg.min_prev_dollar_volume
 
-        if (
-            px >= cfg.min_price
-            and dollar_volume >= cfg.min_prev_dollar_volume
-        ):
-            rows.append((symbol, px, dollar_volume))
-
-    if not rows:
-        out = pd.DataFrame(
-            columns=[
-                "symbol",
-                "snapshot_price",
-                "prev_dollar_volume",
-            ]
+        observations.append(
+            {
+                "symbol": symbol,
+                "bar_timestamp": bar_ts,
+                "snapshot_price": px,
+                "previous_volume": vol,
+                "prev_dollar_volume": dollar_volume,
+                "passed_price": passed_price,
+                "passed_liquidity": passed_liquidity,
+            }
         )
+
+    obs = pd.DataFrame(observations)
+    if obs.empty:
+        passed = pd.DataFrame(
+            columns=["symbol", "snapshot_price", "prev_dollar_volume"]
+        )
+        price_pass_count = 0
+        liquidity_pass_count = 0
     else:
-        out = (
-            pd.DataFrame(
-                rows,
-                columns=[
-                    "symbol",
-                    "snapshot_price",
-                    "prev_dollar_volume",
-                ],
-            )
-            .sort_values("prev_dollar_volume", ascending=False)
+        price_pass_count = int(obs["passed_price"].sum())
+        full_pass = obs[obs["passed_liquidity"]].copy()
+        liquidity_pass_count = int(len(full_pass))
+        passed = (
+            full_pass.sort_values("prev_dollar_volume", ascending=False)
             .head(cfg.max_deep_scan_symbols)
+            [["symbol", "snapshot_price", "prev_dollar_volume"]]
+            .reset_index(drop=True)
         )
 
-    return out, len(valid), len(prev_bars)
+    diag = liquidity_summary(obs, cfg.min_prev_dollar_volume)
+    audit = {
+        "matched_count": len(valid),
+        "sip_bar_count": len(prev_bars),
+        "usable_sip_count": len(obs),
+        "missing_sip_count": max(len(valid) - len(prev_bars), 0),
+        "unusable_sip_count": max(len(prev_bars) - len(obs), 0),
+        "price_pass_count": price_pass_count,
+        "liquidity_pass_count": liquidity_pass_count,
+        "deep_scan_count": len(passed),
+        "deep_scan_capped": liquidity_pass_count > cfg.max_deep_scan_symbols,
+        "q25": diag["q25"],
+        "median": diag["median"],
+        "q75": diag["q75"],
+        "cutoff_sample": diag["cutoff_sample"],
+    }
+    return passed, audit
 
 
 def chart(df, symbol):
@@ -209,10 +269,7 @@ def chart(df, symbol):
             )
         )
 
-    fig.update_layout(
-        height=540,
-        xaxis_rangeslider_visible=False,
-    )
+    fig.update_layout(height=540, xaxis_rangeslider_visible=False)
     return fig
 
 
@@ -229,30 +286,16 @@ if not client:
 with st.sidebar:
     st.header("Scanner controls")
 
-    universe_name = st.selectbox(
-        "Stock universe",
-        UNIVERSE_OPTIONS,
-        index=0,
-    )
+    universe_name = st.selectbox("Stock universe", UNIVERSE_OPTIONS, index=0)
     preset = st.selectbox(
         "Quality mode",
         ["BALANCED", "STRICT", "ELITE", "CUSTOM"],
         index=1,
     )
 
-    min_price = st.number_input(
-        "Minimum price",
-        1.0,
-        500.0,
-        5.0,
-        1.0,
-    )
+    min_price = st.number_input("Minimum price", 1.0, 500.0, 5.0, 1.0)
     min_prev_dv = st.number_input(
-        "Minimum previous-day $ volume (M)",
-        1.0,
-        500.0,
-        20.0,
-        5.0,
+        "Minimum previous-day $ volume (M)", 1.0, 500.0, 20.0, 5.0
     )
     max_symbols = st.selectbox(
         "Maximum deep-scan symbols",
@@ -271,70 +314,30 @@ with st.sidebar:
         st.caption(
             f"{preset}: 20D $Vol ≥ ${min_avg_dv:.0f}M • "
             f"20D Vol ≥ {min_avg_vol:.2f}M • "
-            f"ATR {min_atr:.1f}-{max_atr:.1f}% • "
-            f"RS ≥ {min_rs:.0f}"
+            f"ATR {min_atr:.1f}-{max_atr:.1f}% • RS ≥ {min_rs:.0f}"
         )
     else:
-        with st.expander(
-            "Advanced quality filters",
-            expanded=True,
-        ):
+        with st.expander("Advanced quality filters", expanded=True):
             min_avg_dv = st.number_input(
-                "Minimum 20D avg $ volume (M)",
-                1.0,
-                500.0,
-                20.0,
-                5.0,
+                "Minimum 20D avg $ volume (M)", 1.0, 500.0, 20.0, 5.0
             )
             min_avg_vol = st.number_input(
-                "Minimum 20D avg share volume (M)",
-                0.05,
-                20.0,
-                0.50,
-                0.05,
+                "Minimum 20D avg share volume (M)", 0.05, 20.0, 0.50, 0.05
             )
-            min_atr = st.number_input(
-                "Minimum ATR %",
-                0.1,
-                20.0,
-                1.5,
-                0.1,
-            )
-            max_atr = st.number_input(
-                "Maximum ATR %",
-                1.0,
-                30.0,
-                10.0,
-                0.5,
-            )
+            min_atr = st.number_input("Minimum ATR %", 0.1, 20.0, 1.5, 0.1)
+            max_atr = st.number_input("Maximum ATR %", 1.0, 30.0, 10.0, 0.5)
             min_rs = st.number_input(
-                "Minimum RS percentile",
-                0.0,
-                100.0,
-                60.0,
-                5.0,
+                "Minimum RS percentile", 0.0, 100.0, 60.0, 5.0
             )
 
     with st.expander("Trend gates"):
-        require_above_ma50 = st.toggle(
-            "Require price > MA50",
-            value=False,
-        )
+        require_above_ma50 = st.toggle("Require price > MA50", value=False)
         require_ma50_above_ma200 = st.toggle(
-            "Require MA50 > MA200",
-            value=False,
+            "Require MA50 > MA200", value=False
         )
 
-    strict = st.toggle(
-        "Strict earnings/event gate",
-        value=True,
-    )
-
-    run = st.button(
-        "🚀 Run Scanner",
-        type="primary",
-        use_container_width=True,
-    )
+    strict = st.toggle("Strict earnings/event gate", value=True)
+    run = st.button("🚀 Run Scanner", type="primary", use_container_width=True)
 
 
 cfg = ScannerConfig(
@@ -357,10 +360,7 @@ if "scan" not in st.session_state:
 
 
 if run:
-    progress = st.progress(
-        0.03,
-        text="Resolving selected universe...",
-    )
+    progress = st.progress(0.03, text="Resolving selected universe...")
 
     try:
         uinfo = load_named_universe(universe_name)
@@ -373,22 +373,10 @@ if run:
         st.stop()
 
     selected_symbols = uinfo.symbols
-    universe_member_count = (
-        len(selected_symbols)
-        if selected_symbols
-        else None
-    )
+    universe_member_count = len(selected_symbols) if selected_symbols else None
 
-    progress.progress(
-        0.10,
-        text="Loading consolidated historical market regime...",
-    )
-
-    regime_syms = list(
-        dict.fromkeys(
-            MARKET_SYMBOLS + list(SECTOR_ETFS.keys())
-        )
-    )
+    progress.progress(0.10, text="Loading fixed U.S. market regime...")
+    regime_syms = list(dict.fromkeys(MARKET_SYMBOLS + list(SECTOR_ETFS.keys())))
 
     try:
         regime_bars = load_bars(
@@ -397,15 +385,9 @@ if run:
             cfg.history_days,
             cfg.bar_batch_size,
         )
-        regime = aggregate_regime(
-            regime_bars,
-            MARKET_SYMBOLS,
-        )
+        regime = aggregate_regime(regime_bars, MARKET_SYMBOLS)
     except Exception as exc:
-        st.error(
-            "Historical SIP regime stage failed. "
-            f"Details: {exc}"
-        )
+        st.error(f"Historical SIP regime stage failed. Details: {exc}")
         st.stop()
 
     progress.progress(
@@ -414,16 +396,13 @@ if run:
     )
 
     try:
-        universe_df, matched_count, liquidity_data_count = liquid_universe(
+        universe_df, liquidity_audit = liquid_universe(
             client,
             cfg,
             selected_symbols,
         )
     except Exception as exc:
-        st.error(
-            "Consolidated SIP liquidity stage failed. "
-            f"Details: {exc}"
-        )
+        st.error(f"Consolidated SIP liquidity stage failed. Details: {exc}")
         st.info(
             "The scanner will not silently fall back to IEX-only volume, "
             "because that would understate true U.S. market liquidity."
@@ -431,18 +410,21 @@ if run:
         st.stop()
 
     if universe_df.empty:
-        st.warning(
-            "No securities passed the initial universe/liquidity gates."
-        )
+        st.warning("No securities passed the initial universe/liquidity gates.")
         st.caption(
-            f"Matched to Alpaca: {matched_count:,} • "
-            f"Completed SIP bars received: {liquidity_data_count:,}"
+            f"Matched to Alpaca: {liquidity_audit['matched_count']:,} • "
+            f"Completed SIP bars: {liquidity_audit['sip_bar_count']:,} • "
+            f"Passed price gate: {liquidity_audit['price_pass_count']:,} • "
+            f"Passed liquidity: {liquidity_audit['liquidity_pass_count']:,}"
         )
         st.stop()
 
     progress.progress(
         0.38,
-        text=f"Deep scanning {len(universe_df):,} symbols with consolidated SIP history...",
+        text=(
+            f"Deep scanning {len(universe_df):,} of "
+            f"{liquidity_audit['liquidity_pass_count']:,} SIP-liquid symbols..."
+        ),
     )
 
     try:
@@ -453,77 +435,88 @@ if run:
             cfg.bar_batch_size,
         )
     except Exception as exc:
-        st.error(
-            "Deep historical SIP scan failed. "
-            f"Details: {exc}"
-        )
+        st.error(f"Deep historical SIP scan failed. Details: {exc}")
         st.stop()
 
-    spy = latest_snapshot(
-        regime_bars[
-            regime_bars["symbol"] == "SPY"
-        ]
+    history_returned_count = (
+        int(bars["symbol"].nunique())
+        if bars is not None and not bars.empty and "symbol" in bars.columns
+        else 0
     )
 
+    spy = latest_snapshot(regime_bars[regime_bars["symbol"] == "SPY"])
     cross_section = build_cross_section(
         bars,
         spy.get("ret20"),
         spy.get("ret50"),
     )
 
-    regime = with_breadth(
-        regime,
-        cross_section,
+    history_min_count = (
+        int((cross_section["bars"] >= cfg.min_history_bars).sum())
+        if cross_section is not None
+        and not cross_section.empty
+        and "bars" in cross_section.columns
+        else 0
     )
 
-    progress.progress(
-        0.70,
-        text="Applying persistent quality filters...",
-    )
+    # Market regime remains fixed. Selected-universe breadth and the 70/30
+    # deployment blend are attached explicitly and separately.
+    regime = with_breadth(regime, cross_section)
+    deployment_score = regime.get("deployment_score", regime.get("score", 0))
 
-    eligible, rejected = apply_quality_filters(
-        cross_section,
-        cfg,
-    )
+    progress.progress(0.70, text="Applying persistent quality filters...")
+    eligible, rejected = apply_quality_filters(cross_section, cfg)
 
     progress.progress(
         0.82,
-        text=f"Scoring {len(eligible):,} quality-qualified symbols...",
+        text=f"Scoring {len(eligible):,} persistent-quality symbols...",
     )
-
-    scored = score_universe(
-        eligible,
-        regime["score"],
-        cfg,
-    )
+    scored = score_universe(eligible, deployment_score, cfg)
 
     if not scored.empty:
-        scored = scored.merge(
-            universe_df,
-            on="symbol",
-            how="left",
-        )
+        scored = scored.merge(universe_df, on="symbol", how="left")
+
+    bucket_audit = bucket_integrity(scored)
+    starting_count = universe_member_count or liquidity_audit["matched_count"]
+
+    funnel = build_funnel(
+        [
+            ("Starting universe", starting_count),
+            ("Matched to Alpaca", liquidity_audit["matched_count"]),
+            ("Completed SIP bars", liquidity_audit["sip_bar_count"]),
+            (f"Price ≥ ${cfg.min_price:.2f}", liquidity_audit["price_pass_count"]),
+            (
+                f"Previous-day $ volume ≥ {_money_m(cfg.min_prev_dollar_volume)}",
+                liquidity_audit["liquidity_pass_count"],
+            ),
+            ("Selected for deep scan", liquidity_audit["deep_scan_count"]),
+            ("Deep history returned", history_returned_count),
+            (f"History ≥ {cfg.min_history_bars} bars", history_min_count),
+            ("Persistent quality-qualified", len(eligible)),
+            ("Bucket-classified", bucket_audit["classified_count"]),
+        ]
+    )
 
     st.session_state.scan = {
         "regime": regime,
         "regime_bars": regime_bars,
         "bars": bars,
+        "cross_section": cross_section,
         "scored": scored,
         "rejected": rejected,
         "universe_name": universe_name,
         "universe_info": uinfo,
         "universe_member_count": universe_member_count,
-        "matched_count": matched_count,
-        "liquidity_data_count": liquidity_data_count,
-        "initial_pass_count": len(universe_df),
+        "liquidity_audit": liquidity_audit,
+        "history_returned_count": history_returned_count,
+        "history_min_count": history_min_count,
         "eligible_count": len(eligible),
+        "bucket_audit": bucket_audit,
+        "funnel": funnel,
         "ts": datetime.now(timezone.utc),
     }
 
-    progress.progress(
-        1.0,
-        text="Scan complete",
-    )
+    progress.progress(1.0, text="Scan complete")
 
 
 res = st.session_state.scan
@@ -531,45 +524,42 @@ if not res:
     st.info("Click **Run Scanner** to begin.")
     st.stop()
 
-
 regime = res["regime"]
 scored = res["scored"]
+liq = res["liquidity_audit"]
+bucket_audit = res["bucket_audit"]
 
 
-st.subheader("1) Universe Audit")
+# -----------------------------------------------------------------------------
+# 1) Scanner audit integrity
+# -----------------------------------------------------------------------------
+st.subheader("1) Universe & Scanner Audit")
 
-u1, u2, u3, u4, u5 = st.columns(5)
-
-u1.metric(
-    "Selected universe",
-    res["universe_name"],
-)
+u1, u2, u3, u4, u5, u6 = st.columns(6)
+u1.metric("Selected universe", res["universe_name"])
 u2.metric(
     "Universe members",
-    (
-        f'{res["universe_member_count"]:,}'
-        if res["universe_member_count"]
-        else "Alpaca active"
-    ),
+    f'{res["universe_member_count"]:,}'
+    if res["universe_member_count"]
+    else f'{liq["matched_count"]:,} Alpaca active',
 )
-u3.metric(
-    "Matched to Alpaca",
-    f'{res["matched_count"]:,}',
-)
-u4.metric(
-    "After SIP liquidity",
-    f'{res["initial_pass_count"]:,}',
-)
-u5.metric(
-    "Quality-qualified",
-    f'{res["eligible_count"]:,}',
-)
+u3.metric("Matched to Alpaca", f'{liq["matched_count"]:,}')
+u4.metric("Passed SIP liquidity", f'{liq["liquidity_pass_count"]:,}')
+u5.metric("Deep-scanned", f'{liq["deep_scan_count"]:,}')
+u6.metric("Persistent quality", f'{res["eligible_count"]:,}')
 
 st.caption(
     f'Source: {res["universe_info"].source} • '
     f'Type: {res["universe_info"].source_type} • '
     f'{res["universe_info"].note}'
 )
+
+if liq["deep_scan_capped"]:
+    st.warning(
+        f"Deep-scan cap active: {liq['liquidity_pass_count']:,} securities passed "
+        f"the SIP liquidity gate, but only the top {liq['deep_scan_count']:,} by "
+        "previous-session dollar volume were deep-scanned."
+    )
 
 st.info(
     "Data integrity: previous-day liquidity uses the last fully completed "
@@ -579,51 +569,67 @@ st.info(
     "IEX-only volume is not used for consolidated liquidity gates."
 )
 
+with st.expander("🔎 Scanner Audit Integrity", expanded=True):
+    if bucket_audit["reconciled"] and bucket_audit["classified_count"] == res["eligible_count"]:
+        st.success(
+            "PASS — every persistent-quality symbol is accounted for in exactly "
+            f"one candidate bucket ({bucket_audit['classified_count']:,}/"
+            f"{res['eligible_count']:,})."
+        )
+    else:
+        st.error(
+            "FAIL — candidate accounting does not reconcile. "
+            f"Quality-qualified: {res['eligible_count']:,}; "
+            f"classified: {bucket_audit['classified_count']:,}; "
+            f"unknown bucket rows: {bucket_audit['unknown_count']:,}."
+        )
+        if bucket_audit["unknown_buckets"]:
+            st.write("Unknown buckets:", ", ".join(bucket_audit["unknown_buckets"]))
 
-st.subheader("2) Market Regime")
+    funnel_view = res["funnel"].copy()
+    for col in ["% of prior stage", "% of starting universe"]:
+        funnel_view[col] = funnel_view[col].map(
+            lambda x: "—" if pd.isna(x) else f"{float(x):.1f}%"
+        )
+    st.dataframe(funnel_view, use_container_width=True, hide_index=True)
 
-a, b, c = st.columns(3)
-a.metric(
-    "Regime",
-    regime["label"],
-)
-b.metric(
-    "Score",
-    f'{regime["score"]:.0f}/100',
-)
-c.metric(
-    "Exposure",
-    regime["exposure"],
-)
-
-breadth = regime.get("breadth", {})
-if breadth:
-    b1, b2, b3, b4 = st.columns(4)
-    b1.metric(
-        "% > EMA20",
-        f'{breadth["above_ema20_pct"]:.1f}%',
+    d1, d2, d3, d4, d5 = st.columns(5)
+    d1.metric(
+        "Usable SIP coverage",
+        f'{_pct(liq["usable_sip_count"], liq["matched_count"]):.1f}%',
+        help="Usable completed-session SIP bars divided by Alpaca-matched symbols.",
     )
-    b2.metric(
-        "% > MA50",
-        f'{breadth["above_ma50_pct"]:.1f}%',
-    )
-    b3.metric(
-        "% > MA200",
-        f'{breadth["above_ma200_pct"]:.1f}%',
-    )
-    b4.metric(
-        "Breadth score",
-        f'{breadth["breadth_score"]:.1f}/100',
-    )
+    d2.metric("Missing SIP bars", f'{liq["missing_sip_count"]:,}')
+    d3.metric("Prev $Vol P25", _money_m(liq["q25"]))
+    d4.metric("Prev $Vol median", _money_m(liq["median"]))
+    d5.metric("Prev $Vol P75", _money_m(liq["q75"]))
 
-
-st.subheader("3) Swing Candidates")
-
-if scored is None or scored.empty:
-    st.warning(
-        "No symbols passed all quality filters. "
-        "NO TRADE is a valid result."
-    )
+    cutoff = liq["cutoff_sample"]
+    if cutoff is not None and not cutoff.empty:
+        st.caption(
+            "Securities nearest the previous-session dollar-volume cutoff — "
+            "use this to sanity-check the SIP liquidity boundary."
+        )
+        cutoff_view = cutoff[
+            [
+                "symbol",
+                "bar_timestamp",
+                "snapshot_price",
+                "previous_volume",
+                "prev_dollar_volume",
+                "liquidity_status",
+            ]
+        ].copy()
+        cutoff_view["snapshot_price"] = cutoff_view["snapshot_price"].map(
+            lambda x: f"${x:,.2f}"
+        )
+        cutoff_view["previous_volume"] = cutoff_view["previous_volume"].map(
+            lambda x: f"{x:,.0f}"
+        )
+        cutoff_view["prev_dollar_volume"] = cutoff_view["prev_dollar_volume"].map(
+            _money_m
+        )
+        st.dataframe(cutoff_view, use_container_width=True, hide_index=True)
 
     if res["rejected"] is not None and not res["rejected"].empty:
         reason_counts = (
@@ -634,51 +640,103 @@ if scored is None or scored.empty:
             .replace("", pd.NA)
             .dropna()
             .value_counts()
-            .head(8)
+            .head(10)
         )
         if not reason_counts.empty:
-            st.caption("Top quality-filter rejection reasons")
+            st.caption("Top persistent-quality rejection reasons")
             st.dataframe(
                 reason_counts.rename("count").to_frame(),
                 use_container_width=True,
             )
 
-    st.stop()
 
+# -----------------------------------------------------------------------------
+# 2) Market regime, selected-universe breadth, deployment regime
+# -----------------------------------------------------------------------------
+st.subheader("2) Market & Deployment Regime")
 
-bucket_order = [
-    "ACTIONABLE NOW",
-    "TECH ACTIONABLE — EVENT CHECK",
-    "A-QUALITY — WAIT",
-    "DEVELOPING",
-    "AVOID / BROKEN",
-    "ALL",
-]
+breadth = regime.get("breadth", {})
+r1, r2, r3, r4 = st.columns(4)
+r1.metric("U.S. Market Regime", regime["label"])
+r2.metric("Market score", f'{regime["score"]:.0f}/100')
+r3.metric(
+    "Selected-universe breadth",
+    f'{breadth.get("breadth_score", 0):.1f}/100' if breadth else "—",
+)
+r4.metric(
+    "Deployment score",
+    f'{regime.get("deployment_score", regime["score"]):.0f}/100',
+)
 
-counts = scored["bucket"].value_counts().to_dict()
-count_cols = st.columns(5)
-labels = bucket_order[:-1]
-
-for i, label in enumerate(labels):
-    count_cols[i].metric(
-        label.replace(
-            "TECH ACTIONABLE — EVENT CHECK",
-            "TECH + EVENT CHECK",
-        ),
-        counts.get(label, 0),
+if breadth:
+    b1, b2, b3, b4 = st.columns(4)
+    b1.metric("% > EMA20", f'{breadth["above_ema20_pct"]:.1f}%')
+    b2.metric("% > MA50", f'{breadth["above_ma50_pct"]:.1f}%')
+    b3.metric("% > MA200", f'{breadth["above_ma200_pct"]:.1f}%')
+    b4.metric(
+        "% > EMA20 & MA50",
+        f'{breadth["above_ema20_and_ma50_pct"]:.1f}%',
     )
 
-bucket = st.radio(
-    "Bucket",
-    bucket_order,
-    horizontal=True,
+st.caption(
+    "U.S. Market Regime is fixed from SPY/QQQ/IWM and does not change merely "
+    "because a different stock universe is selected. Deployment score = 70% "
+    "market regime + 30% selected-universe breadth."
+)
+st.info(
+    f"Deployment: {regime.get('deployment_label', regime['label'])} • "
+    f"Exposure: {regime.get('deployment_exposure', regime['exposure'])}"
 )
 
-view = (
-    scored
-    if bucket == "ALL"
-    else scored[scored["bucket"] == bucket]
+
+# -----------------------------------------------------------------------------
+# 3) Candidate accounting and buckets
+# -----------------------------------------------------------------------------
+st.subheader("3) Swing Candidates")
+
+if scored is None or scored.empty:
+    st.warning(
+        "No symbols passed all persistent-quality filters. "
+        "NO TRADE is a valid result."
+    )
+    st.stop()
+
+bucket_display = {
+    "ACTIONABLE NOW": "ACTIONABLE NOW",
+    "TECH + EVENT CHECK": "TECH ACTIONABLE — EVENT CHECK",
+    "A-QUALITY — WAIT": "A-QUALITY — WAIT",
+    "WAIT / ENTRY NOT READY": "WAIT",
+    "DEVELOPING": "DEVELOPING",
+    "AVOID / BROKEN": "AVOID / BROKEN",
+    "ALL": "ALL",
+}
+
+counts = bucket_audit["counts"]
+count_cols = st.columns(6)
+metric_labels = [
+    ("ACTIONABLE NOW", "ACTIONABLE NOW"),
+    ("TECH + EVENT CHECK", "TECH ACTIONABLE — EVENT CHECK"),
+    ("A-QUALITY — WAIT", "A-QUALITY — WAIT"),
+    ("WAIT / ENTRY NOT READY", "WAIT"),
+    ("DEVELOPING", "DEVELOPING"),
+    ("AVOID / BROKEN", "AVOID / BROKEN"),
+]
+for i, (display, code) in enumerate(metric_labels):
+    count_cols[i].metric(display, counts.get(code, 0))
+
+st.caption(
+    "Bucket reconciliation: "
+    f"{bucket_audit['classified_count']:,} classified = "
+    f"{res['eligible_count']:,} persistent-quality qualified."
 )
+
+bucket_label = st.radio(
+    "Bucket",
+    list(bucket_display.keys()),
+    horizontal=True,
+)
+bucket_code = bucket_display[bucket_label]
+view = scored if bucket_code == "ALL" else scored[scored["bucket"] == bucket_code]
 
 cols = [
     "symbol",
@@ -705,98 +763,49 @@ cols = [
 ]
 
 st.dataframe(
-    view[
-        [c for c in cols if c in view.columns]
-    ].head(150),
+    view[[c for c in cols if c in view.columns]].head(150),
     use_container_width=True,
     hide_index=True,
 )
 
 
+# -----------------------------------------------------------------------------
+# 4) Candidate detail
+# -----------------------------------------------------------------------------
 st.subheader("4) Candidate Detail")
 
-sel = st.selectbox(
-    "Symbol",
-    scored["symbol"].head(100).tolist(),
-)
-
-row = scored[
-    scored["symbol"] == sel
-].iloc[0]
-
-symbol_bars = res["bars"][
-    res["bars"]["symbol"] == sel
-]
+sel = st.selectbox("Symbol", scored["symbol"].head(100).tolist())
+row = scored[scored["symbol"] == sel].iloc[0]
+symbol_bars = res["bars"][res["bars"]["symbol"] == sel]
 
 m1, m2, m3, m4 = st.columns(4)
+m1.metric("Candidate Quality", f'{row["quality_score"]:.1f}/100')
+m2.metric("Entry Quality", f'{row["entry_score"]:.1f}/100')
+m3.metric("RS", f'{row["rs_score"]:.1f} %ile')
+m4.metric("Decision", row["decision"])
 
-m1.metric(
-    "Candidate Quality",
-    f'{row["quality_score"]:.1f}/100',
-)
-m2.metric(
-    "Entry Quality",
-    f'{row["entry_score"]:.1f}/100',
-)
-m3.metric(
-    "RS",
-    f'{row["rs_score"]:.1f} %ile',
-)
-m4.metric(
-    "Decision",
-    row["decision"],
-)
-
-st.write(
-    f'**Why quality:** '
-    f'{row.get("quality_reasons", "") or "—"}'
-)
-st.write(
-    f'**Why entry:** '
-    f'{row.get("entry_reasons", "") or "—"}'
-)
+st.write(f'**Why quality:** {row.get("quality_reasons", "") or "—"}')
+st.write(f'**Why entry:** {row.get("entry_reasons", "") or "—"}')
 
 if row["chase_reasons"]:
-    st.warning(
-        "Anti-chase gate: "
-        + row["chase_reasons"]
-    )
+    st.warning("Anti-chase gate: " + row["chase_reasons"])
 
 if row["event_confidence"] == "UNKNOWN":
     st.warning(
-        "Event Data Confidence: UNKNOWN. "
-        "Verify earnings/event timing before any action."
+        "Event Data Confidence: UNKNOWN. Verify earnings/event timing before any action."
     )
 
+p1, p2, p3, p4 = st.columns(4)
+p1.metric("Entry ref", f'${row["entry_px"]:.2f}')
+p2.metric("Stop", f'${row["stop"]:.2f}')
+p3.metric("T1", f'${row["t1"]:.2f}')
+p4.metric("T2", f'${row["t2"]:.2f}')
 
-t1, t2, t3, t4 = st.columns(4)
-
-t1.metric(
-    "Entry ref",
-    f'${row["entry_px"]:.2f}',
-)
-t2.metric(
-    "Stop",
-    f'${row["stop"]:.2f}',
-)
-t3.metric(
-    "T1",
-    f'${row["t1"]:.2f}',
-)
-t4.metric(
-    "T2",
-    f'${row["t2"]:.2f}',
-)
-
-st.plotly_chart(
-    chart(symbol_bars, sel),
-    use_container_width=True,
-)
+st.plotly_chart(chart(symbol_bars, sel), use_container_width=True)
 
 st.caption(
     f'Latest/snapshot feed: {client.creds.feed.upper()} • '
-    f'Historical feed: {client.creds.historical_feed.upper()} '
-    '(≥20m delayed) • '
+    f'Historical feed: {client.creds.historical_feed.upper()} (≥20m delayed) • '
     f'Scan UTC: {res["ts"].strftime("%Y-%m-%d %H:%M:%S")} • '
     'Paper orders disabled. Scanner output is research, not execution.'
 )
