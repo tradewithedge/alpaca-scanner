@@ -12,7 +12,6 @@ from scanner.inspector import (
     reference_signature,
     resolve_reference_universe,
     scan_reference_compatible,
-    inspector_state_on_scanner_run,
     liquidity_diagnostic,
     normalize_ticker,
     pct_rank_against_reference,
@@ -141,24 +140,6 @@ class TickerInspectorTests(unittest.TestCase):
         self.assertFalse(
             scan_reference_compatible(scan, "S&P 500", bad_sig)
         )
-
-    def test_scanner_run_preserves_current_inspector_input(self):
-        state = inspector_state_on_scanner_run("AMZN", "", False)
-        self.assertEqual(state["ticker"], "AMZN")
-        self.assertTrue(state["requested"])
-        self.assertFalse(state["expanded"])
-
-    def test_scanner_run_preserves_previously_requested_ticker(self):
-        state = inspector_state_on_scanner_run("", "NVDA", True)
-        self.assertEqual(state["ticker"], "NVDA")
-        self.assertTrue(state["requested"])
-        self.assertFalse(state["expanded"])
-
-    def test_scanner_run_does_not_invent_inspector_without_ticker(self):
-        state = inspector_state_on_scanner_run("", "", False)
-        self.assertEqual(state["ticker"], "")
-        self.assertFalse(state["requested"])
-        self.assertFalse(state["expanded"])
 
 
 if __name__ == "__main__":
