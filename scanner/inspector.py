@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 
-INSPECTOR_VERSION = "V1.2.1.3"
+INSPECTOR_VERSION = "V1.2.1.3b"
 
 
 def symbol_key(symbol: str) -> str:
@@ -121,6 +121,77 @@ def inspector_authority(
         "official_status": str(bucket or "ELIGIBLE") if eligible else "NOT ELIGIBLE",
         "conclusion": "ELIGIBLE" if eligible else "NOT ELIGIBLE",
     }
+
+
+AUTO_REFERENCE_LABEL = "AUTO — Current selected universe"
+
+
+def resolve_reference_universe(
+    current_universe: str,
+    reference_choice: str | None,
+) -> str:
+    """Resolve AUTO to the current scanner universe; otherwise use override."""
+    choice = str(reference_choice or AUTO_REFERENCE_LABEL).strip()
+    if not choice or choice == AUTO_REFERENCE_LABEL:
+        return str(current_universe)
+    return choice
+
+
+def reference_signature(
+    universe_name: str,
+    min_price: float,
+    min_prev_dollar_volume: float,
+    max_deep_scan_symbols: int,
+    history_days: int,
+) -> tuple:
+    """Stable identity for the peer population used by cross-sectional scores."""
+    return (
+        str(universe_name),
+        round(float(min_price), 6),
+        round(float(min_prev_dollar_volume), 2),
+        int(max_deep_scan_symbols),
+        int(history_days),
+    )
+
+
+def scan_reference_compatible(
+    scan: dict | None,
+    requested_universe: str,
+    requested_signature: tuple,
+) -> bool:
+    """A completed scan is reusable only when its peer population is identical."""
+    if not scan:
+        return False
+    cross = scan.get("cross_section")
+    if cross is None or getattr(cross, "empty", True):
+        return False
+    if str(scan.get("universe_name", "")) != str(requested_universe):
+        return False
+    return tuple(scan.get("reference_signature", ())) == tuple(requested_signature)
+
+
+def reference_coverage(reference_count: int, deep_scan_count: int) -> float:
+    if not deep_scan_count:
+        return 0.0
+    return float(reference_count) / float(deep_scan_count)
+
+
+def reference_confidence(reference_count: int, deep_scan_count: int) -> str:
+    """Confidence in the cross-sectional peer distribution itself."""
+    coverage = reference_coverage(reference_count, deep_scan_count)
+    if reference_count >= 20 and coverage >= 0.95:
+        return "HIGH"
+    if reference_count >= 20 and coverage >= 0.90:
+        return "MEDIUM"
+    return "LOW"
+
+
+def reference_is_usable(reference_count: int, deep_scan_count: int) -> bool:
+    """Hard integrity gate for decision-grade percentile scoring."""
+    return (
+        int(reference_count) >= 20
+        and reference_coverage(reference_count, deep_scan_count) >= 0.90
+    )
 
 def liquidity_diagnostic(bar: dict | None, min_price: float, min_dollar_volume: float) -> dict:
     """Explain previous-session price/liquidity gates for one ticker."""
