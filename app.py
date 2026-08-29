@@ -48,6 +48,7 @@ in_selected_universe = inspector_module.in_selected_universe
 pct_rank_against_reference = inspector_module.pct_rank_against_reference
 zero_to_100_rank_against_reference = inspector_module.zero_to_100_rank_against_reference
 liquidity_diagnostic = inspector_module.liquidity_diagnostic
+inspector_authority = inspector_module.inspector_authority
 add_leadership_features = leadership_module.add_leadership_features
 aggregate_regime = regime_module.aggregate_regime
 with_breadth = regime_module.with_breadth
@@ -61,7 +62,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.1.2"
+APP_VERSION = "V1.2.1.3"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -71,11 +72,11 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Ticker Inspector Utility"
+    "• Trade With Edge • Candidate Quality Engine • Ticker Inspector Final Polish"
 )
 st.caption(
-    "Roadmap utility: V1.2.1.2 Ticker Inspector • Frozen V1.2.1 leadership "
-    "and scanner classifications remain unchanged"
+    "Roadmap utility: V1.2.1.3 Ticker Inspector Final Polish • Frozen V1.2.1 "
+    "leadership and scanner classifications remain unchanged"
 )
 
 
@@ -389,6 +390,11 @@ with st.sidebar:
             "Inspect ticker",
             use_container_width=True,
         )
+    clear_inspector = st.button(
+        "Clear inspector",
+        use_container_width=True,
+        help="Hide the current ticker inspector without changing scanner results.",
+    )
 
 
 cfg = ScannerConfig(
@@ -412,11 +418,23 @@ if "inspector_ticker" not in st.session_state:
     st.session_state.inspector_ticker = ""
 if "inspector_requested" not in st.session_state:
     st.session_state.inspector_requested = False
+if "inspector_expanded" not in st.session_state:
+    st.session_state.inspector_expanded = True
+
+if clear_inspector:
+    st.session_state.inspector_requested = False
+    st.session_state.inspector_expanded = False
 
 if inspect_submit:
     normalized = normalize_ticker(ticker_query)
     st.session_state.inspector_ticker = normalized
     st.session_state.inspector_requested = True
+    st.session_state.inspector_expanded = True
+
+if run and st.session_state.inspector_requested:
+    # Preserve the ticker for convenient comparison, but do not force a stale
+    # inspector panel to dominate the newly completed scanner dashboard.
+    st.session_state.inspector_expanded = False
 
 
 if run:
@@ -802,16 +820,25 @@ def inspect_ticker(client, cfg, symbol, reference_scan=None):
     for key, value in leadership_row.items():
         row[key] = value
 
-    eligible_df, rejected_df = apply_quality_filters(
-        pd.DataFrame([row]),
-        cfg,
-    )
-    persistent_pass = not eligible_df.empty
-    gate_reasons = (
-        ""
-        if persistent_pass
-        else str(rejected_df.iloc[0].get("eligibility_reasons", ""))
-    )
+    has_reference = reference_cross is not None and not reference_cross.empty
+
+    if has_reference:
+        eligible_df, rejected_df = apply_quality_filters(
+            pd.DataFrame([row]),
+            cfg,
+        )
+        persistent_pass = not eligible_df.empty
+        gate_reasons = (
+            ""
+            if persistent_pass
+            else str(rejected_df.iloc[0].get("eligibility_reasons", ""))
+        )
+    else:
+        persistent_pass = None
+        gate_reasons = (
+            "Cross-sectional RS reference required before persistent-quality "
+            "eligibility can be determined."
+        )
 
     deployment_score = regime.get("deployment_score", regime.get("score", 0))
     diagnostic_scored = score_universe(
@@ -824,6 +851,14 @@ def inspect_ticker(client, cfg, symbol, reference_scan=None):
         if diagnostic_scored is not None and not diagnostic_scored.empty
         else pd.Series(dtype=object)
     )
+
+    if not has_reference and not scored_row.empty:
+        # Hard integrity gate: single-ticker/self-ranked RS must never leak into
+        # official Candidate Quality or scanner classification.
+        scored_row["quality_score"] = np.nan
+        scored_row["quality_reasons"] = ""
+        scored_row["bucket"] = "NOT RANKED"
+        scored_row["decision"] = "NOT RANKED"
 
     return {
         "symbol": resolved,
@@ -839,14 +874,14 @@ def inspect_ticker(client, cfg, symbol, reference_scan=None):
         "persistent_pass": persistent_pass,
         "gate_reasons": gate_reasons,
         "diagnostic": scored_row,
-        "has_reference": reference_cross is not None and not reference_cross.empty,
+        "has_reference": has_reference,
         "scan_ts": (
             reference_scan.get("ts") if reference_scan is not None else None
         ),
     }
 
 
-def render_ticker_inspector(result, cfg):
+def render_ticker_inspector(result, cfg, show_title=True):
     if result.get("error"):
         st.error(result["error"])
         return
@@ -856,7 +891,15 @@ def render_ticker_inspector(result, cfg):
     diag = result["diagnostic"]
     liq = result["liquidity"]
 
-    st.subheader(f"🔎 Ticker Inspector — {symbol}")
+    authority = inspector_authority(
+        result["has_reference"],
+        result["persistent_pass"],
+        liq["status"],
+        diag.get("bucket") if not diag.empty else None,
+    )
+
+    if show_title:
+        st.subheader(f"🔎 Ticker Inspector — {symbol}")
     st.caption(
         f"Cross-sectional reference: {result['reference_name']} • "
         "Inspector is read-only and does not alter scanner counts or buckets."
@@ -874,21 +917,22 @@ def render_ticker_inspector(result, cfg):
     i5.metric("SIP liquidity gate", liq["status"])
     i6.metric(
         "Persistent quality",
-        "PASS" if result["persistent_pass"] else "FAIL",
+        authority["persistent_quality"],
     )
 
     if not result["has_reference"]:
         st.warning(
-            "No completed scanner cross-section is available. Direct technical "
-            "and raw leadership diagnostics are shown, but percentile-based "
-            "Legacy RS / Leadership Score should be treated as unavailable "
-            "until a scanner run establishes the reference distribution."
+            "No completed scanner cross-section is available. Direct technical, "
+            "entry, and raw leadership diagnostics remain available, but "
+            "Candidate Quality, Leadership Score/Grade, Legacy RS percentile, "
+            "persistent-quality eligibility, and official scanner status are "
+            "REFERENCE REQUIRED and are intentionally suppressed."
         )
 
     if liq["status"] != "PASS":
         st.warning("Initial liquidity gate: " + liq["reason"])
 
-    if not result["persistent_pass"]:
+    if result["has_reference"] and result["persistent_pass"] is False:
         st.warning(
             "Persistent-quality gate: FAIL"
             + (f" — {result['gate_reasons']}" if result["gate_reasons"] else "")
@@ -926,41 +970,47 @@ def render_ticker_inspector(result, cfg):
     q1, q2, q3, q4, q5 = st.columns(5)
     q1.metric(
         "Candidate Quality",
-        f"{diag.get('quality_score'):.1f}/100"
-        if pd.notna(diag.get("quality_score"))
-        else "—",
+        (
+            f"{diag.get('quality_score'):.1f}/100"
+            if authority["candidate_quality_authoritative"]
+            and pd.notna(diag.get("quality_score"))
+            else "REF REQUIRED"
+        ),
     )
     q2.metric(
         "Leadership",
-        f"{row.get('leadership_score'):.1f}/100"
-        if pd.notna(row.get("leadership_score"))
-        else "—",
+        (
+            f"{row.get('leadership_score'):.1f}/100"
+            if authority["leadership_authoritative"]
+            and pd.notna(row.get("leadership_score"))
+            else "REF REQUIRED"
+        ),
     )
     q3.metric(
-        "Entry Quality",
+        "Entry Quality" if result["has_reference"] else "Entry Quality (diagnostic)",
         f"{diag.get('entry_score'):.1f}/100"
         if pd.notna(diag.get("entry_score"))
         else "—",
     )
     q4.metric(
         "Legacy RS",
-        f"{row.get('rs_score'):.1f} %ile"
-        if result["has_reference"] and pd.notna(row.get("rs_score"))
-        else "—",
+        (
+            f"{row.get('rs_score'):.1f} %ile"
+            if authority["legacy_rs_authoritative"]
+            and pd.notna(row.get("rs_score"))
+            else "REF REQUIRED"
+        ),
     )
     q5.metric(
         "Official scanner status",
-        (
-            str(diag.get("bucket", "—"))
-            if result["persistent_pass"] and liq["status"] == "PASS"
-            else "NOT ELIGIBLE"
-        ),
+        authority["official_status"],
     )
 
-    if pd.notna(diag.get("quality_score")):
+    if authority["candidate_quality_authoritative"] and pd.notna(diag.get("quality_score")):
         st.write(
             f"**Why quality:** {diag.get('quality_reasons', '') or '—'}"
         )
+    if pd.notna(diag.get("entry_score")):
         st.write(
             f"**Why entry:** {diag.get('entry_reasons', '') or '—'}"
         )
@@ -972,7 +1022,12 @@ def render_ticker_inspector(result, cfg):
         expanded=True,
     ):
         l1, l2, l3, l4, l5 = st.columns(5)
-        l1.metric("Leadership grade", row.get("leadership_grade", "N/A"))
+        l1.metric(
+            "Leadership grade",
+            row.get("leadership_grade", "N/A")
+            if result["has_reference"]
+            else "REF REQUIRED",
+        )
         l2.metric(
             "RS vs SPY • 20D",
             f"{row.get('rs_vs_spy_20_pct'):+.1f}%"
@@ -1054,7 +1109,13 @@ def render_ticker_inspector(result, cfg):
                 + str(row["leadership_risks"])
             )
 
-    if result["persistent_pass"] and liq["status"] == "PASS":
+    if not result["has_reference"]:
+        st.info(
+            "Inspector conclusion: DIRECT DIAGNOSTICS ONLY — run the scanner "
+            "to establish a cross-sectional reference before any official "
+            "quality, leadership grade, eligibility, or bucket is shown."
+        )
+    elif result["persistent_pass"] and liq["status"] == "PASS":
         st.success(
             f"Inspector conclusion: {diag.get('decision', '—')} • "
             f"Bucket: {diag.get('bucket', '—')}"
@@ -1086,7 +1147,47 @@ if st.session_state.inspector_requested:
                 st.session_state.inspector_ticker,
                 res,
             )
-            render_ticker_inspector(inspector_result, cfg)
+
+            if inspector_result.get("error"):
+                inspector_label = (
+                    f"🔎 Ticker Inspector — "
+                    f"{st.session_state.inspector_ticker} | ERROR"
+                )
+            else:
+                authority = inspector_authority(
+                    inspector_result["has_reference"],
+                    inspector_result["persistent_pass"],
+                    inspector_result["liquidity"]["status"],
+                    inspector_result["diagnostic"].get("bucket")
+                    if not inspector_result["diagnostic"].empty
+                    else None,
+                )
+                lead_grade = (
+                    inspector_result["row"].get("leadership_grade", "N/A")
+                    if inspector_result["has_reference"]
+                    else "REF REQUIRED"
+                )
+                legacy_rs = inspector_result["row"].get("rs_score")
+                rs_label = (
+                    f"{legacy_rs:.1f}%ile"
+                    if inspector_result["has_reference"] and pd.notna(legacy_rs)
+                    else "REF REQUIRED"
+                )
+                inspector_label = (
+                    f"🔎 Ticker Inspector — {inspector_result['symbol']} | "
+                    f"{authority['official_status']} | Leadership {lead_grade} | "
+                    f"RS {rs_label}"
+                )
+
+            with st.expander(
+                inspector_label,
+                expanded=st.session_state.inspector_expanded,
+            ):
+                render_ticker_inspector(
+                    inspector_result,
+                    cfg,
+                    show_title=False,
+                )
             st.divider()
         except Exception as exc:
             st.error(f"Ticker Inspector failed safely: {exc}")
