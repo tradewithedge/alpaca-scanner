@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 
-INSPECTOR_VERSION = "V1.2.1.2"
+INSPECTOR_VERSION = "V1.2.1.3"
 
 
 def symbol_key(symbol: str) -> str:
@@ -86,6 +86,41 @@ def zero_to_100_rank_against_reference(value, reference) -> float:
     rank = float(combined.rank(method="average", ascending=True).iloc[-1])
     return float(np.clip(100.0 * (rank - 1.0) / (n - 1.0), 0.0, 100.0))
 
+
+
+def inspector_authority(
+    has_reference: bool,
+    persistent_pass,
+    liquidity_status: str,
+    bucket: str | None = None,
+) -> dict:
+    """Return the authoritative UI state for Ticker Inspector outputs.
+
+    A completed scanner cross-section is mandatory before percentile-dependent
+    Candidate Quality, Leadership Score/Grade, persistent-quality eligibility,
+    or an official scanner bucket may be presented as authoritative.
+    """
+    if not has_reference:
+        return {
+            "persistent_quality": "REF REQUIRED",
+            "candidate_quality_authoritative": False,
+            "leadership_authoritative": False,
+            "legacy_rs_authoritative": False,
+            "official_status": "NOT RANKED",
+            "conclusion": "DIRECT DIAGNOSTICS",
+        }
+
+    persistent_label = "PASS" if persistent_pass is True else "FAIL"
+    eligible = liquidity_status == "PASS" and persistent_pass is True
+
+    return {
+        "persistent_quality": persistent_label,
+        "candidate_quality_authoritative": True,
+        "leadership_authoritative": True,
+        "legacy_rs_authoritative": True,
+        "official_status": str(bucket or "ELIGIBLE") if eligible else "NOT ELIGIBLE",
+        "conclusion": "ELIGIBLE" if eligible else "NOT ELIGIBLE",
+    }
 
 def liquidity_diagnostic(bar: dict | None, min_price: float, min_dollar_volume: float) -> dict:
     """Explain previous-session price/liquidity gates for one ticker."""
