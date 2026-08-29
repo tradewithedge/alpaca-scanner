@@ -57,7 +57,6 @@ scan_reference_compatible = inspector_module.scan_reference_compatible
 reference_coverage = inspector_module.reference_coverage
 reference_confidence = inspector_module.reference_confidence
 reference_is_usable = inspector_module.reference_is_usable
-inspector_state_on_scanner_run = inspector_module.inspector_state_on_scanner_run
 add_leadership_features = leadership_module.add_leadership_features
 aggregate_regime = regime_module.aggregate_regime
 with_breadth = regime_module.with_breadth
@@ -71,7 +70,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.1.3b1"
+APP_VERSION = "V1.2.1.3c"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -81,12 +80,12 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Self-Contained Ticker Inspector Reference Engine • Persistence Fix"
+    "• Trade With Edge • Candidate Quality Engine • Self-Contained Ticker Inspector Reference Engine • Explicit-Action UX"
 )
 st.caption(
-    "Roadmap utility: V1.2.1.3b1 Self-Contained Ticker Inspector Reference Engine "
-    "• Acceptance persistence fix • Frozen V1.2.1 leadership and scanner "
-    "classifications remain unchanged"
+    "Roadmap utility: V1.2.1.3c Ticker Inspector Explicit-Action UX • "
+    "Run Scanner never creates/reactivates Inspector • Frozen V1.2.1 "
+    "leadership and scanner classifications remain unchanged"
 )
 
 
@@ -328,6 +327,40 @@ if not client:
     st.stop()
 
 
+# -----------------------------------------------------------------------------
+# Ticker Inspector explicit-action state.
+# Typing a ticker alone does NOT open the Inspector.
+# Only "Inspect ticker" activates it; only "Clear inspector" deactivates it.
+# Run Scanner has NO authority over Inspector visibility/state.
+# -----------------------------------------------------------------------------
+if "scan" not in st.session_state:
+    st.session_state.scan = None
+if "inspector_ticker" not in st.session_state:
+    st.session_state.inspector_ticker = ""
+if "inspector_requested" not in st.session_state:
+    st.session_state.inspector_requested = False
+if "inspector_expanded" not in st.session_state:
+    st.session_state.inspector_expanded = True
+if "inspector_query_input" not in st.session_state:
+    st.session_state.inspector_query_input = st.session_state.inspector_ticker
+
+
+def _submit_inspector_callback():
+    normalized = normalize_ticker(
+        st.session_state.get("inspector_query_input", "")
+    )
+    st.session_state.inspector_ticker = normalized
+    st.session_state.inspector_requested = bool(normalized)
+    st.session_state.inspector_expanded = True
+
+
+def _clear_inspector_callback():
+    st.session_state.inspector_query_input = ""
+    st.session_state.inspector_ticker = ""
+    st.session_state.inspector_requested = False
+    st.session_state.inspector_expanded = False
+
+
 with st.sidebar:
     st.header("Scanner controls")
 
@@ -400,20 +433,28 @@ with st.sidebar:
             "reference automatically."
         ),
     )
-    with st.form("ticker_inspector_form", clear_on_submit=False):
-        ticker_query = st.text_input(
-            "Ticker symbol",
-            placeholder="AMZN",
-            max_chars=15,
-        )
-        inspect_submit = st.form_submit_button(
-            "Inspect ticker",
-            use_container_width=True,
-        )
+    ticker_query = st.text_input(
+        "Ticker symbol",
+        placeholder="AMZN",
+        max_chars=15,
+        key="inspector_query_input",
+        help=(
+            "Typing a ticker does not open the Inspector. "
+            "Click Inspect ticker to analyze it."
+        ),
+    )
+    inspect_submit = st.button(
+        "Inspect ticker",
+        use_container_width=True,
+        key="inspect_ticker_button",
+        on_click=_submit_inspector_callback,
+    )
     clear_inspector = st.button(
         "Clear inspector",
         use_container_width=True,
-        help="Hide the current ticker inspector without changing scanner results.",
+        key="clear_inspector_button",
+        help="Hide and clear the Inspector without changing scanner results.",
+        on_click=_clear_inspector_callback,
     )
 
 
@@ -587,36 +628,6 @@ def resolve_inspector_reference(
         return ctx, None
     except Exception as exc:
         return None, str(exc)
-
-
-if "scan" not in st.session_state:
-    st.session_state.scan = None
-if "inspector_ticker" not in st.session_state:
-    st.session_state.inspector_ticker = ""
-if "inspector_requested" not in st.session_state:
-    st.session_state.inspector_requested = False
-if "inspector_expanded" not in st.session_state:
-    st.session_state.inspector_expanded = True
-
-if clear_inspector:
-    st.session_state.inspector_requested = False
-    st.session_state.inspector_expanded = False
-
-if inspect_submit:
-    normalized = normalize_ticker(ticker_query)
-    st.session_state.inspector_ticker = normalized
-    st.session_state.inspector_requested = True
-    st.session_state.inspector_expanded = True
-
-if run:
-    inspector_transition = inspector_state_on_scanner_run(
-        ticker_query,
-        st.session_state.inspector_ticker,
-        st.session_state.inspector_requested,
-    )
-    st.session_state.inspector_ticker = inspector_transition["ticker"]
-    st.session_state.inspector_requested = inspector_transition["requested"]
-    st.session_state.inspector_expanded = inspector_transition["expanded"]
 
 
 if run:
