@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 
-INSPECTOR_VERSION = "V1.2.1.3b1"
+INSPECTOR_VERSION = "V1.2.1.3c"
 
 
 def symbol_key(symbol: str) -> str:
@@ -194,29 +194,6 @@ def reference_is_usable(reference_count: int, deep_scan_count: int) -> bool:
     )
 
 
-def inspector_state_on_scanner_run(
-    current_input: str,
-    remembered_ticker: str,
-    previously_requested: bool,
-) -> dict:
-    """Preserve a visible ticker inspector across a scanner rerun.
-
-    The current sidebar value is authoritative when present. This avoids
-    relying on a transient request flag during a long Streamlit rerun.
-    """
-    current = normalize_ticker(current_input)
-    remembered = normalize_ticker(remembered_ticker)
-    ticker = current or remembered
-
-    # A visible ticker means the user wants that Inspector available after
-    # Run Scanner. Otherwise preserve an already-requested remembered ticker.
-    requested = bool(ticker and (current or previously_requested))
-
-    return {
-        "ticker": ticker,
-        "requested": requested,
-        "expanded": False,
-    }
 
 def liquidity_diagnostic(bar: dict | None, min_price: float, min_dollar_volume: float) -> dict:
     """Explain previous-session price/liquidity gates for one ticker."""
