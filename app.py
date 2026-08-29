@@ -57,6 +57,7 @@ scan_reference_compatible = inspector_module.scan_reference_compatible
 reference_coverage = inspector_module.reference_coverage
 reference_confidence = inspector_module.reference_confidence
 reference_is_usable = inspector_module.reference_is_usable
+inspector_state_on_scanner_run = inspector_module.inspector_state_on_scanner_run
 add_leadership_features = leadership_module.add_leadership_features
 aggregate_regime = regime_module.aggregate_regime
 with_breadth = regime_module.with_breadth
@@ -70,7 +71,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.1.3b"
+APP_VERSION = "V1.2.1.3b1"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -80,11 +81,12 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Self-Contained Ticker Inspector Reference Engine"
+    "• Trade With Edge • Candidate Quality Engine • Self-Contained Ticker Inspector Reference Engine • Persistence Fix"
 )
 st.caption(
-    "Roadmap utility: V1.2.1.3 Ticker Inspector Final Polish Hotfix • Frozen V1.2.1 "
-    "leadership and scanner classifications remain unchanged"
+    "Roadmap utility: V1.2.1.3b1 Self-Contained Ticker Inspector Reference Engine "
+    "• Acceptance persistence fix • Frozen V1.2.1 leadership and scanner "
+    "classifications remain unchanged"
 )
 
 
@@ -606,10 +608,15 @@ if inspect_submit:
     st.session_state.inspector_requested = True
     st.session_state.inspector_expanded = True
 
-if run and st.session_state.inspector_requested:
-    # Preserve the ticker for convenient comparison, but do not force a stale
-    # inspector panel to dominate the newly completed scanner dashboard.
-    st.session_state.inspector_expanded = False
+if run:
+    inspector_transition = inspector_state_on_scanner_run(
+        ticker_query,
+        st.session_state.inspector_ticker,
+        st.session_state.inspector_requested,
+    )
+    st.session_state.inspector_ticker = inspector_transition["ticker"]
+    st.session_state.inspector_requested = inspector_transition["requested"]
+    st.session_state.inspector_expanded = inspector_transition["expanded"]
 
 
 if run:
