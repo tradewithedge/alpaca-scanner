@@ -50,6 +50,13 @@ pct_rank_against_reference = inspector_module.pct_rank_against_reference
 zero_to_100_rank_against_reference = inspector_module.zero_to_100_rank_against_reference
 liquidity_diagnostic = inspector_module.liquidity_diagnostic
 inspector_authority = inspector_module.inspector_authority
+AUTO_REFERENCE_LABEL = inspector_module.AUTO_REFERENCE_LABEL
+resolve_reference_universe = inspector_module.resolve_reference_universe
+reference_signature = inspector_module.reference_signature
+scan_reference_compatible = inspector_module.scan_reference_compatible
+reference_coverage = inspector_module.reference_coverage
+reference_confidence = inspector_module.reference_confidence
+reference_is_usable = inspector_module.reference_is_usable
 add_leadership_features = leadership_module.add_leadership_features
 aggregate_regime = regime_module.aggregate_regime
 with_breadth = regime_module.with_breadth
@@ -63,7 +70,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.1.3a"
+APP_VERSION = "V1.2.1.3b"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -73,7 +80,7 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Ticker Inspector Final Polish Hotfix"
+    "• Trade With Edge • Candidate Quality Engine • Self-Contained Ticker Inspector Reference Engine"
 )
 st.caption(
     "Roadmap utility: V1.2.1.3 Ticker Inspector Final Polish Hotfix • Frozen V1.2.1 "
@@ -381,6 +388,16 @@ with st.sidebar:
         "Inspect any active Alpaca U.S. equity without changing the scanner "
         "universe, audit funnel, or candidate buckets."
     )
+    inspector_reference_choice = st.selectbox(
+        "Reference universe",
+        [AUTO_REFERENCE_LABEL] + list(UNIVERSE_OPTIONS),
+        index=0,
+        help=(
+            "AUTO uses the current Stock universe. A completed compatible scan "
+            "is reused; otherwise the Inspector builds a cached read-only peer "
+            "reference automatically."
+        ),
+    )
     with st.form("ticker_inspector_form", clear_on_submit=False):
         ticker_query = st.text_input(
             "Ticker symbol",
@@ -411,6 +428,163 @@ cfg = ScannerConfig(
     max_deep_scan_symbols=max_symbols,
     strict_event_gate=strict,
 )
+
+inspector_reference_universe = resolve_reference_universe(
+    universe_name,
+    inspector_reference_choice,
+)
+inspector_reference_signature = reference_signature(
+    inspector_reference_universe,
+    cfg.min_price,
+    cfg.min_prev_dollar_volume,
+    cfg.max_deep_scan_symbols,
+    cfg.history_days,
+)
+
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def build_inspector_reference_cached(
+    _client,
+    _cfg,
+    reference_universe_name,
+    cache_signature,
+):
+    """Build the same peer cross-section used by scanner scoring, read-only."""
+    uinfo = load_named_universe(reference_universe_name)
+    selected_symbols = uinfo.symbols
+    universe_member_count = len(selected_symbols) if selected_symbols else None
+
+    regime_syms = list(dict.fromkeys(MARKET_SYMBOLS + list(SECTOR_ETFS.keys())))
+    regime_bars = load_bars(
+        _client,
+        tuple(regime_syms),
+        _cfg.history_days,
+        _cfg.bar_batch_size,
+    )
+    regime = aggregate_regime(regime_bars, MARKET_SYMBOLS)
+
+    universe_df, liquidity_audit = liquid_universe(
+        _client,
+        _cfg,
+        selected_symbols,
+    )
+    if universe_df is None or universe_df.empty:
+        raise RuntimeError(
+            "No securities passed the selected reference universe/liquidity gates."
+        )
+
+    bars = load_bars(
+        _client,
+        tuple(universe_df["symbol"].tolist()),
+        _cfg.history_days,
+        _cfg.bar_batch_size,
+    )
+    if bars is None or bars.empty:
+        raise RuntimeError(
+            "No consolidated SIP history was returned for the reference universe."
+        )
+
+    spy = latest_snapshot(regime_bars[regime_bars["symbol"] == "SPY"])
+    cross_section = build_cross_section(
+        bars,
+        spy.get("ret20"),
+        spy.get("ret50"),
+    )
+    if cross_section is None or cross_section.empty:
+        raise RuntimeError("Reference cross-section could not be constructed.")
+
+    spy_bars = regime_bars[regime_bars["symbol"] == "SPY"].copy()
+    cross_section = add_leadership_features(
+        cross_section,
+        bars,
+        spy_bars,
+    )
+
+    deep_count = int(liquidity_audit.get("deep_scan_count", len(universe_df)))
+    ref_count = int(len(cross_section))
+    coverage = reference_coverage(ref_count, deep_count)
+    confidence = reference_confidence(ref_count, deep_count)
+
+    if not reference_is_usable(ref_count, deep_count):
+        raise RuntimeError(
+            f"Reference integrity gate failed: {ref_count:,}/{deep_count:,} "
+            f"symbols produced usable cross-sectional history "
+            f"({coverage:.1%} coverage). At least 20 peers and 90% coverage "
+            "are required."
+        )
+
+    regime = with_breadth(regime, cross_section)
+
+    return {
+        "universe_name": reference_universe_name,
+        "universe_info": uinfo,
+        "universe_member_count": universe_member_count,
+        "selected_symbols": selected_symbols,
+        "regime": regime,
+        "regime_bars": regime_bars,
+        "bars": bars,
+        "cross_section": cross_section,
+        "liquidity_audit": liquidity_audit,
+        "reference_signature": tuple(cache_signature),
+        "reference_origin": "AUTO-BUILT / CACHED",
+        "reference_count": ref_count,
+        "reference_deep_count": deep_count,
+        "reference_coverage": coverage,
+        "reference_confidence": confidence,
+        "ts": datetime.now(timezone.utc),
+    }
+
+
+def completed_scan_reference(scan):
+    """Copy scan context and attach explicit reference metadata."""
+    ctx = dict(scan)
+    cross = ctx.get("cross_section")
+    liq = ctx.get("liquidity_audit", {}) or {}
+    ref_count = (
+        int(len(cross))
+        if cross is not None and not getattr(cross, "empty", True)
+        else 0
+    )
+    deep_count = int(liq.get("deep_scan_count", ref_count))
+    ctx["reference_origin"] = "COMPLETED SCAN"
+    ctx["reference_count"] = ref_count
+    ctx["reference_deep_count"] = deep_count
+    ctx["reference_coverage"] = reference_coverage(ref_count, deep_count)
+    ctx["reference_confidence"] = reference_confidence(ref_count, deep_count)
+    return ctx
+
+
+def resolve_inspector_reference(
+    client,
+    cfg,
+    requested_universe,
+    requested_signature,
+    current_scan,
+):
+    """Reuse a compatible scan reference or auto-build a read-only one."""
+    if scan_reference_compatible(
+        current_scan,
+        requested_universe,
+        requested_signature,
+    ):
+        ctx = completed_scan_reference(current_scan)
+        if reference_is_usable(
+            ctx["reference_count"],
+            ctx["reference_deep_count"],
+        ):
+            return ctx, None
+
+    try:
+        ctx = build_inspector_reference_cached(
+            client,
+            cfg,
+            requested_universe,
+            tuple(requested_signature),
+        )
+        return ctx, None
+    except Exception as exc:
+        return None, str(exc)
 
 
 if "scan" not in st.session_state:
@@ -593,6 +767,13 @@ if run:
         "scored": scored,
         "rejected": rejected,
         "universe_name": universe_name,
+        "reference_signature": reference_signature(
+            universe_name,
+            cfg.min_price,
+            cfg.min_prev_dollar_volume,
+            cfg.max_deep_scan_symbols,
+            cfg.history_days,
+        ),
         "universe_info": uinfo,
         "universe_member_count": universe_member_count,
         "selected_symbols": selected_symbols,
@@ -735,7 +916,7 @@ def inspect_ticker(client, cfg, symbol, reference_scan=None):
     exchange = asset.get("exchange", "—")
 
     if reference_scan is not None:
-        reference_name = reference_scan.get("universe_name", "Current scan")
+        reference_name = reference_scan.get("universe_name", "Current reference")
         selected_symbols = reference_scan.get("selected_symbols")
         if selected_symbols is None:
             try:
@@ -745,10 +926,38 @@ def inspect_ticker(client, cfg, symbol, reference_scan=None):
         reference_cross = reference_scan.get("cross_section")
         regime_bars = reference_scan.get("regime_bars")
         regime = reference_scan.get("regime", {})
+        reference_origin = reference_scan.get("reference_origin", "COMPLETED SCAN")
+        reference_count = int(
+            reference_scan.get(
+                "reference_count",
+                len(reference_cross)
+                if reference_cross is not None
+                and not getattr(reference_cross, "empty", True)
+                else 0,
+            )
+        )
+        reference_deep_count = int(
+            reference_scan.get("reference_deep_count", reference_count)
+        )
+        reference_cov = float(
+            reference_scan.get(
+                "reference_coverage",
+                reference_coverage(reference_count, reference_deep_count),
+            )
+        )
+        reference_conf = reference_scan.get(
+            "reference_confidence",
+            reference_confidence(reference_count, reference_deep_count),
+        )
     else:
-        reference_name = "No completed scan"
+        reference_name = "Reference unavailable"
         selected_symbols = None
         reference_cross = None
+        reference_origin = "UNAVAILABLE"
+        reference_count = 0
+        reference_deep_count = 0
+        reference_cov = 0.0
+        reference_conf = "LOW"
         regime_syms = list(dict.fromkeys(MARKET_SYMBOLS + list(SECTOR_ETFS.keys())))
         regime_bars = load_bars(
             client,
@@ -868,6 +1077,11 @@ def inspect_ticker(client, cfg, symbol, reference_scan=None):
         "tradable": tradable,
         "exchange": exchange,
         "reference_name": reference_name,
+        "reference_origin": reference_origin,
+        "reference_count": reference_count,
+        "reference_deep_count": reference_deep_count,
+        "reference_coverage": reference_cov,
+        "reference_confidence": reference_conf,
         "membership": membership,
         "liquidity": liq,
         "bars": ticker_bars,
@@ -901,10 +1115,21 @@ def render_ticker_inspector(result, cfg, show_title=True):
 
     if show_title:
         st.subheader(f"🔎 Ticker Inspector — {symbol}")
-    st.caption(
-        f"Cross-sectional reference: {result['reference_name']} • "
-        "Inspector is read-only and does not alter scanner counts or buckets."
-    )
+    if result["has_reference"]:
+        st.caption(
+            f"Cross-sectional reference: {result['reference_name']} • "
+            f"{result['reference_origin']} • "
+            f"N={result['reference_count']:,}/{result['reference_deep_count']:,} "
+            f"({result['reference_coverage']:.1%} coverage) • "
+            f"Reference Confidence: {result['reference_confidence']} • "
+            "Read-only: scanner counts and buckets are not changed."
+        )
+    else:
+        st.caption(
+            f"Requested cross-sectional reference: "
+            f"{result.get('requested_reference_name', result['reference_name'])} • "
+            "Reference unavailable • Read-only: scanner counts and buckets are not changed."
+        )
 
     i1, i2, i3, i4, i5, i6 = st.columns(6)
     i1.metric("Alpaca status", "ACTIVE" if result["active"] else "NOT ACTIVE")
@@ -912,7 +1137,7 @@ def render_ticker_inspector(result, cfg, show_title=True):
     i3.metric("Exchange", result["exchange"])
     membership = result["membership"]
     i4.metric(
-        "Selected-universe member",
+        "Reference-universe member",
         "ALL U.S." if membership is None else ("YES" if membership else "NO"),
     )
     i5.metric("SIP liquidity gate", liq["status"])
@@ -922,12 +1147,13 @@ def render_ticker_inspector(result, cfg, show_title=True):
     )
 
     if not result["has_reference"]:
+        ref_error = result.get("reference_error")
         st.warning(
-            "No completed scanner cross-section is available. Direct technical, "
-            "entry, and raw leadership diagnostics remain available, but "
-            "Candidate Quality, Leadership Score/Grade, Legacy RS percentile, "
-            "persistent-quality eligibility, and official scanner status are "
-            "REFERENCE REQUIRED and are intentionally suppressed."
+            "Automatic peer-reference construction did not produce a trusted "
+            "cross-section. Direct technical, entry, and raw leadership "
+            "diagnostics remain available, but percentile-dependent outputs "
+            "stay REF REQUIRED as a fail-safe."
+            + (f" Reference error: {ref_error}" if ref_error else "")
         )
 
     if liq["status"] != "PASS":
@@ -1003,7 +1229,7 @@ def render_ticker_inspector(result, cfg, show_title=True):
         ),
     )
     q5.metric(
-        "Official scanner status",
+        "Inspector engine status",
         authority["official_status"],
     )
 
@@ -1112,9 +1338,9 @@ def render_ticker_inspector(result, cfg, show_title=True):
 
     if not result["has_reference"]:
         st.info(
-            "Inspector conclusion: DIRECT DIAGNOSTICS ONLY — run the scanner "
-            "to establish a cross-sectional reference before any official "
-            "quality, leadership grade, eligibility, or bucket is shown."
+            "Inspector conclusion: DIRECT DIAGNOSTICS ONLY — automatic "
+            "reference construction failed its integrity gate, so percentile-"
+            "dependent quality/leadership/eligibility remains blocked."
         )
     elif result["persistent_pass"] and liq["status"] == "PASS":
         st.success(
@@ -1142,12 +1368,29 @@ if st.session_state.inspector_requested:
         st.error("Enter a valid ticker symbol, for example AMZN.")
     else:
         try:
+            with st.spinner(
+                f"Preparing {inspector_reference_universe} peer reference..."
+            ):
+                inspector_reference_ctx, inspector_reference_error = (
+                    resolve_inspector_reference(
+                        client,
+                        cfg,
+                        inspector_reference_universe,
+                        inspector_reference_signature,
+                        res,
+                    )
+                )
+
             inspector_result = inspect_ticker(
                 client,
                 cfg,
                 st.session_state.inspector_ticker,
-                res,
+                inspector_reference_ctx,
             )
+            inspector_result["requested_reference_name"] = (
+                inspector_reference_universe
+            )
+            inspector_result["reference_error"] = inspector_reference_error
 
             if inspector_result.get("error"):
                 inspector_label = (
@@ -1199,9 +1442,9 @@ if st.session_state.inspector_requested:
 
 if not res:
     st.info(
-        "Ticker Inspector can provide direct diagnostics now. Run Scanner "
-        "when you want the full cross-sectional percentile reference and the "
-        "normal universe dashboard."
+        "Ticker Inspector is self-contained: it automatically builds/reuses "
+        "the selected peer reference for complete cross-sectional scoring. "
+        "Run Scanner only when you want the full universe audit and candidate dashboard."
     )
     st.stop()
 
