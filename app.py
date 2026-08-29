@@ -2,6 +2,7 @@ import importlib
 import os
 from datetime import datetime, timezone
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -62,7 +63,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.1.3"
+APP_VERSION = "V1.2.1.3a"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -72,10 +73,10 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Ticker Inspector Final Polish"
+    "• Trade With Edge • Candidate Quality Engine • Ticker Inspector Final Polish Hotfix"
 )
 st.caption(
-    "Roadmap utility: V1.2.1.3 Ticker Inspector Final Polish • Frozen V1.2.1 "
+    "Roadmap utility: V1.2.1.3 Ticker Inspector Final Polish Hotfix • Frozen V1.2.1 "
     "leadership and scanner classifications remain unchanged"
 )
 
