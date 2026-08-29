@@ -4,6 +4,7 @@ import numpy as np
 
 from scanner.inspector import (
     in_selected_universe,
+    inspector_authority,
     liquidity_diagnostic,
     normalize_ticker,
     pct_rank_against_reference,
@@ -51,6 +52,41 @@ class TickerInspectorTests(unittest.TestCase):
         )
         self.assertEqual(failing["status"], "FAIL")
         self.assertIn("dollar volume", failing["reason"])
+
+    def test_no_reference_never_claims_official_quality(self):
+        state = inspector_authority(
+            has_reference=False,
+            persistent_pass=True,
+            liquidity_status="PASS",
+            bucket="TECH ACTIONABLE — EVENT CHECK",
+        )
+        self.assertEqual(state["persistent_quality"], "REF REQUIRED")
+        self.assertFalse(state["candidate_quality_authoritative"])
+        self.assertFalse(state["leadership_authoritative"])
+        self.assertFalse(state["legacy_rs_authoritative"])
+        self.assertEqual(state["official_status"], "NOT RANKED")
+        self.assertEqual(state["conclusion"], "DIRECT DIAGNOSTICS")
+
+    def test_reference_fail_is_not_eligible(self):
+        state = inspector_authority(
+            has_reference=True,
+            persistent_pass=False,
+            liquidity_status="PASS",
+            bucket="A-QUALITY — WAIT",
+        )
+        self.assertEqual(state["persistent_quality"], "FAIL")
+        self.assertEqual(state["official_status"], "NOT ELIGIBLE")
+
+    def test_reference_pass_can_show_bucket(self):
+        state = inspector_authority(
+            has_reference=True,
+            persistent_pass=True,
+            liquidity_status="PASS",
+            bucket="A-QUALITY — WAIT",
+        )
+        self.assertEqual(state["persistent_quality"], "PASS")
+        self.assertEqual(state["official_status"], "A-QUALITY — WAIT")
+        self.assertTrue(state["candidate_quality_authoritative"])
 
 
 if __name__ == "__main__":
