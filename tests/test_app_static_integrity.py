@@ -7,7 +7,7 @@ class AppStaticIntegrityTests(unittest.TestCase):
     def test_numpy_alias_exists_when_np_is_used(self):
         app_path = (
             Path(__file__).resolve().parents[1]
-            / "ALPACA_Scanner_V1.2.1.3b_Self_Contained_Ticker_Inspector_Reference_Engine.py"
+            / "ALPACA_Scanner_V1.2.1.3b1_Inspector_Persistence_Acceptance_Fix.py"
         )
         source = app_path.read_text(encoding="utf-8")
         tree = ast.parse(source)
@@ -36,14 +36,14 @@ class AppStaticIntegrityTests(unittest.TestCase):
     def test_app_syntax_parses(self):
         app_path = (
             Path(__file__).resolve().parents[1]
-            / "ALPACA_Scanner_V1.2.1.3b_Self_Contained_Ticker_Inspector_Reference_Engine.py"
+            / "ALPACA_Scanner_V1.2.1.3b1_Inspector_Persistence_Acceptance_Fix.py"
         )
         ast.parse(app_path.read_text(encoding="utf-8"))
 
     def test_self_contained_reference_engine_present(self):
         app_path = (
             Path(__file__).resolve().parents[1]
-            / "ALPACA_Scanner_V1.2.1.3b_Self_Contained_Ticker_Inspector_Reference_Engine.py"
+            / "ALPACA_Scanner_V1.2.1.3b1_Inspector_Persistence_Acceptance_Fix.py"
         )
         source = app_path.read_text(encoding="utf-8")
         tree = ast.parse(source)
@@ -59,7 +59,7 @@ class AppStaticIntegrityTests(unittest.TestCase):
     def test_reference_builder_does_not_assign_scanner_session_state(self):
         app_path = (
             Path(__file__).resolve().parents[1]
-            / "ALPACA_Scanner_V1.2.1.3b_Self_Contained_Ticker_Inspector_Reference_Engine.py"
+            / "ALPACA_Scanner_V1.2.1.3b1_Inspector_Persistence_Acceptance_Fix.py"
         )
         source = app_path.read_text(encoding="utf-8")
         tree = ast.parse(source)
@@ -95,13 +95,40 @@ class AppStaticIntegrityTests(unittest.TestCase):
     def test_auto_reference_call_exists_before_ticker_inspection_call(self):
         app_path = (
             Path(__file__).resolve().parents[1]
-            / "ALPACA_Scanner_V1.2.1.3b_Self_Contained_Ticker_Inspector_Reference_Engine.py"
+            / "ALPACA_Scanner_V1.2.1.3b1_Inspector_Persistence_Acceptance_Fix.py"
         )
         source = app_path.read_text(encoding="utf-8")
         self.assertIn("resolve_inspector_reference(", source)
         self.assertIn("inspector_reference_ctx", source)
         self.assertIn(
             "st.session_state.inspector_ticker,\n                inspector_reference_ctx,",
+            source,
+        )
+
+    def test_run_scanner_syncs_ticker_inspector_state(self):
+        app_path = (
+            Path(__file__).resolve().parents[1]
+            / "ALPACA_Scanner_V1.2.1.3b1_Inspector_Persistence_Acceptance_Fix.py"
+        )
+        source = app_path.read_text(encoding="utf-8")
+        self.assertIn("inspector_state_on_scanner_run(", source)
+        self.assertIn(
+            'st.session_state.inspector_requested = inspector_transition["requested"]',
+            source,
+        )
+        self.assertIn(
+            'st.session_state.inspector_expanded = inspector_transition["expanded"]',
+            source,
+        )
+
+    def test_old_fragile_transition_removed(self):
+        app_path = (
+            Path(__file__).resolve().parents[1]
+            / "ALPACA_Scanner_V1.2.1.3b1_Inspector_Persistence_Acceptance_Fix.py"
+        )
+        source = app_path.read_text(encoding="utf-8")
+        self.assertNotIn(
+            "if run and st.session_state.inspector_requested:",
             source,
         )
 
