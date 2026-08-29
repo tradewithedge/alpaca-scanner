@@ -15,6 +15,7 @@ import scanner.alpaca_client as alpaca_client_module
 import scanner.audit as audit_module
 import scanner.config as scanner_config
 import scanner.indicators as indicators_module
+import scanner.inspector as inspector_module
 import scanner.leadership as leadership_module
 import scanner.regime as regime_module
 import scanner.scoring as scoring_module
@@ -24,6 +25,7 @@ for _module in (
     alpaca_client_module,
     scanner_config,
     indicators_module,
+    inspector_module,
     leadership_module,
     regime_module,
     scoring_module,
@@ -40,6 +42,12 @@ SECTOR_ETFS = scanner_config.SECTOR_ETFS
 QUALITY_PRESETS = scanner_config.QUALITY_PRESETS
 add_indicators = indicators_module.add_indicators
 latest_snapshot = indicators_module.latest_snapshot
+normalize_ticker = inspector_module.normalize_ticker
+resolve_asset = inspector_module.resolve_asset
+in_selected_universe = inspector_module.in_selected_universe
+pct_rank_against_reference = inspector_module.pct_rank_against_reference
+zero_to_100_rank_against_reference = inspector_module.zero_to_100_rank_against_reference
+liquidity_diagnostic = inspector_module.liquidity_diagnostic
 add_leadership_features = leadership_module.add_leadership_features
 aggregate_regime = regime_module.aggregate_regime
 with_breadth = regime_module.with_breadth
@@ -53,7 +61,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.1.1"
+APP_VERSION = "V1.2.1.2"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -63,11 +71,11 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Leadership Interpretability Polish"
+    "• Trade With Edge • Candidate Quality Engine • Ticker Inspector Utility"
 )
 st.caption(
-    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.1.1 Leadership "
-    "Interpretability Polish (shadow validation)"
+    "Roadmap utility: V1.2.1.2 Ticker Inspector • Frozen V1.2.1 leadership "
+    "and scanner classifications remain unchanged"
 )
 
 
@@ -365,6 +373,23 @@ with st.sidebar:
     strict = st.toggle("Strict earnings/event gate", value=True)
     run = st.button("🚀 Run Scanner", type="primary", use_container_width=True)
 
+    st.divider()
+    st.subheader("🔎 Ticker Inspector")
+    st.caption(
+        "Inspect any active Alpaca U.S. equity without changing the scanner "
+        "universe, audit funnel, or candidate buckets."
+    )
+    with st.form("ticker_inspector_form", clear_on_submit=False):
+        ticker_query = st.text_input(
+            "Ticker symbol",
+            placeholder="AMZN",
+            max_chars=15,
+        )
+        inspect_submit = st.form_submit_button(
+            "Inspect ticker",
+            use_container_width=True,
+        )
+
 
 cfg = ScannerConfig(
     min_price=min_price,
@@ -383,6 +408,15 @@ cfg = ScannerConfig(
 
 if "scan" not in st.session_state:
     st.session_state.scan = None
+if "inspector_ticker" not in st.session_state:
+    st.session_state.inspector_ticker = ""
+if "inspector_requested" not in st.session_state:
+    st.session_state.inspector_requested = False
+
+if inspect_submit:
+    normalized = normalize_ticker(ticker_query)
+    st.session_state.inspector_ticker = normalized
+    st.session_state.inspector_requested = True
 
 
 if run:
@@ -542,6 +576,7 @@ if run:
         "universe_name": universe_name,
         "universe_info": uinfo,
         "universe_member_count": universe_member_count,
+        "selected_symbols": selected_symbols,
         "liquidity_audit": liquidity_audit,
         "history_returned_count": history_returned_count,
         "history_min_count": history_min_count,
@@ -554,9 +589,518 @@ if run:
     progress.progress(1.0, text="Scan complete")
 
 
+def _inspector_leadership_row(ticker_row, ticker_bars, spy_bars, reference):
+    """Score one ticker against the current scan's frozen V1.2.1 reference."""
+    row = ticker_row.copy()
+
+    # If already present in the scan reference, use the exact frozen row.
+    if reference is not None and not reference.empty:
+        existing = reference[reference["symbol"] == row["symbol"]]
+        if not existing.empty and "leadership_score" in existing.columns:
+            return existing.iloc[0].copy()
+
+    raw = leadership_module._symbol_leadership_features(
+        ticker_bars,
+        spy_bars,
+        -0.01,
+        60,
+        3,
+    )
+    for key, value in raw.items():
+        row[key] = value
+
+    if reference is None or reference.empty:
+        row["leadership_score"] = float("nan")
+        row["leadership_grade"] = "N/A"
+        row["leadership_reasons"] = ""
+        row["leadership_risks"] = (
+            "No completed scanner cross-section is available for "
+            "cross-sectional Leadership Score ranking."
+        )
+    else:
+        ref = reference[reference["symbol"] != row["symbol"]].copy()
+
+        row["lead_rs20_pct"] = zero_to_100_rank_against_reference(
+            row.get("rs_vs_spy_20"), ref.get("rs_vs_spy_20", pd.Series(dtype=float))
+        )
+        row["lead_rs50_pct"] = zero_to_100_rank_against_reference(
+            row.get("rs_vs_spy_50"), ref.get("rs_vs_spy_50", pd.Series(dtype=float))
+        )
+        row["lead_accel_pct"] = zero_to_100_rank_against_reference(
+            row.get("rs_accel"), ref.get("rs_accel", pd.Series(dtype=float))
+        )
+        stress_excess_pct = zero_to_100_rank_against_reference(
+            row.get("stress_excess_mean"),
+            ref.get("stress_excess_mean", pd.Series(dtype=float)),
+        )
+        stress_win_pct = zero_to_100_rank_against_reference(
+            row.get("stress_outperform_rate"),
+            ref.get("stress_outperform_rate", pd.Series(dtype=float)),
+        )
+        row["lead_stress_excess_pct"] = stress_excess_pct
+        row["lead_stress_win_pct"] = stress_win_pct
+        row["lead_resilience_pct"] = (
+            0.60 * stress_excess_pct + 0.40 * stress_win_pct
+            if pd.notna(stress_excess_pct) and pd.notna(stress_win_pct)
+            else stress_excess_pct if pd.notna(stress_excess_pct) else stress_win_pct
+        )
+        row["lead_rs_high_pct"] = zero_to_100_rank_against_reference(
+            row.get("rs_line_high_gap"),
+            ref.get("rs_line_high_gap", pd.Series(dtype=float)),
+        )
+
+        components = [
+            ("lead_rs20_pct", 0.30),
+            ("lead_rs50_pct", 0.25),
+            ("lead_accel_pct", 0.15),
+            ("lead_resilience_pct", 0.20),
+            ("lead_rs_high_pct", 0.10),
+        ]
+        weighted = []
+        weights = []
+        for col, weight in components:
+            value = row.get(col)
+            if pd.notna(value):
+                weighted.append(float(value) * weight)
+                weights.append(weight)
+        score = sum(weighted) / sum(weights) if weights else float("nan")
+        row["leadership_score"] = score
+        row["leadership_grade"] = leadership_module._grade(score)
+        reasons, risks = leadership_module._explain(pd.Series(row))
+        row["leadership_reasons"] = reasons
+        row["leadership_risks"] = risks
+
+    # User-facing forms retained even when full ranking is unavailable.
+    for raw_col, display_col in [
+        ("rs_vs_spy_20", "rs_vs_spy_20_pct"),
+        ("rs_vs_spy_50", "rs_vs_spy_50_pct"),
+        ("rs_vs_spy_100", "rs_vs_spy_100_pct"),
+        ("rs20_10d_ago", "rs20_10d_ago_pct"),
+        ("rs20_change_10d", "rs20_change_10d_pp"),
+        ("stress_excess_mean", "stress_excess_mean_pct"),
+        ("stress_outperform_rate", "stress_outperform_pct"),
+    ]:
+        value = row.get(raw_col)
+        row[display_col] = 100.0 * float(value) if pd.notna(value) else float("nan")
+
+    capture = row.get("downside_capture")
+    row["downside_capture_pct"] = (
+        100.0 * float(capture) if pd.notna(capture) else float("nan")
+    )
+    return row
+
+
+def inspect_ticker(client, cfg, symbol, reference_scan=None):
+    """Run an audit-safe single-ticker diagnostic.
+
+    The inspector never mutates the frozen scanner result. When a completed scan
+    is available, percentile-based RS/Leadership and legacy quality scoring use
+    that scan as the reference distribution.
+    """
+    symbol = normalize_ticker(symbol)
+    if not symbol:
+        return {"error": "Enter a valid U.S. ticker symbol, for example AMZN."}
+
+    asset = resolve_asset(load_assets(client), symbol)
+    if asset is None:
+        return {
+            "error": (
+                f"{symbol} could not be resolved to one unique active Alpaca "
+                "U.S. equity."
+            )
+        }
+
+    resolved = str(asset.get("symbol", symbol)).upper()
+    active = asset.get("status") == "active"
+    tradable = bool(asset.get("tradable"))
+    exchange = asset.get("exchange", "—")
+
+    if reference_scan is not None:
+        reference_name = reference_scan.get("universe_name", "Current scan")
+        selected_symbols = reference_scan.get("selected_symbols")
+        if selected_symbols is None:
+            try:
+                selected_symbols = reference_scan["universe_info"].symbols
+            except Exception:
+                selected_symbols = None
+        reference_cross = reference_scan.get("cross_section")
+        regime_bars = reference_scan.get("regime_bars")
+        regime = reference_scan.get("regime", {})
+    else:
+        reference_name = "No completed scan"
+        selected_symbols = None
+        reference_cross = None
+        regime_syms = list(dict.fromkeys(MARKET_SYMBOLS + list(SECTOR_ETFS.keys())))
+        regime_bars = load_bars(
+            client,
+            tuple(regime_syms),
+            cfg.history_days,
+            cfg.bar_batch_size,
+        )
+        regime = aggregate_regime(regime_bars, MARKET_SYMBOLS)
+
+    membership = in_selected_universe(resolved, selected_symbols)
+
+    prev = load_prev_daily_bars(client, (resolved,), cfg.snapshot_batch_size)
+    liq = liquidity_diagnostic(
+        prev.get(resolved),
+        cfg.min_price,
+        cfg.min_prev_dollar_volume,
+    )
+
+    ticker_bars = load_bars(
+        client,
+        (resolved,),
+        cfg.history_days,
+        cfg.bar_batch_size,
+    )
+    if ticker_bars is None or ticker_bars.empty:
+        return {
+            "error": f"No usable historical SIP daily bars were returned for {resolved}."
+        }
+
+    spy_bars = regime_bars[regime_bars["symbol"] == "SPY"].copy()
+    spy_snapshot = latest_snapshot(spy_bars)
+
+    one = build_cross_section(
+        ticker_bars,
+        spy_snapshot.get("ret20"),
+        spy_snapshot.get("ret50"),
+    )
+    if one is None or one.empty:
+        return {
+            "error": (
+                f"{resolved} does not have enough usable daily history to build "
+                "the technical cross-section."
+            )
+        }
+
+    row = one.iloc[0].copy()
+    row["symbol"] = resolved
+
+    if reference_cross is not None and not reference_cross.empty:
+        existing = reference_cross[reference_cross["symbol"] == resolved]
+        if not existing.empty:
+            # Exact frozen reference row when this symbol was already deep-scanned.
+            row = existing.iloc[0].copy()
+        else:
+            ref = reference_cross[reference_cross["symbol"] != resolved]
+            row["rs20_pct"] = pct_rank_against_reference(
+                row.get("rs20"), ref.get("rs20", pd.Series(dtype=float))
+            )
+            row["rs50_pct"] = pct_rank_against_reference(
+                row.get("rs50"), ref.get("rs50", pd.Series(dtype=float))
+            )
+            row["rs_score"] = 0.60 * row["rs20_pct"] + 0.40 * row["rs50_pct"]
+
+    leadership_row = _inspector_leadership_row(
+        row,
+        ticker_bars,
+        spy_bars,
+        reference_cross,
+    )
+    for key, value in leadership_row.items():
+        row[key] = value
+
+    eligible_df, rejected_df = apply_quality_filters(
+        pd.DataFrame([row]),
+        cfg,
+    )
+    persistent_pass = not eligible_df.empty
+    gate_reasons = (
+        ""
+        if persistent_pass
+        else str(rejected_df.iloc[0].get("eligibility_reasons", ""))
+    )
+
+    deployment_score = regime.get("deployment_score", regime.get("score", 0))
+    diagnostic_scored = score_universe(
+        pd.DataFrame([row]),
+        deployment_score,
+        cfg,
+    )
+    scored_row = (
+        diagnostic_scored.iloc[0].copy()
+        if diagnostic_scored is not None and not diagnostic_scored.empty
+        else pd.Series(dtype=object)
+    )
+
+    return {
+        "symbol": resolved,
+        "asset": asset,
+        "active": active,
+        "tradable": tradable,
+        "exchange": exchange,
+        "reference_name": reference_name,
+        "membership": membership,
+        "liquidity": liq,
+        "bars": ticker_bars,
+        "row": row,
+        "persistent_pass": persistent_pass,
+        "gate_reasons": gate_reasons,
+        "diagnostic": scored_row,
+        "has_reference": reference_cross is not None and not reference_cross.empty,
+        "scan_ts": (
+            reference_scan.get("ts") if reference_scan is not None else None
+        ),
+    }
+
+
+def render_ticker_inspector(result, cfg):
+    if result.get("error"):
+        st.error(result["error"])
+        return
+
+    symbol = result["symbol"]
+    row = result["row"]
+    diag = result["diagnostic"]
+    liq = result["liquidity"]
+
+    st.subheader(f"🔎 Ticker Inspector — {symbol}")
+    st.caption(
+        f"Cross-sectional reference: {result['reference_name']} • "
+        "Inspector is read-only and does not alter scanner counts or buckets."
+    )
+
+    i1, i2, i3, i4, i5, i6 = st.columns(6)
+    i1.metric("Alpaca status", "ACTIVE" if result["active"] else "NOT ACTIVE")
+    i2.metric("Tradable", "YES" if result["tradable"] else "NO")
+    i3.metric("Exchange", result["exchange"])
+    membership = result["membership"]
+    i4.metric(
+        "Selected-universe member",
+        "ALL U.S." if membership is None else ("YES" if membership else "NO"),
+    )
+    i5.metric("SIP liquidity gate", liq["status"])
+    i6.metric(
+        "Persistent quality",
+        "PASS" if result["persistent_pass"] else "FAIL",
+    )
+
+    if not result["has_reference"]:
+        st.warning(
+            "No completed scanner cross-section is available. Direct technical "
+            "and raw leadership diagnostics are shown, but percentile-based "
+            "Legacy RS / Leadership Score should be treated as unavailable "
+            "until a scanner run establishes the reference distribution."
+        )
+
+    if liq["status"] != "PASS":
+        st.warning("Initial liquidity gate: " + liq["reason"])
+
+    if not result["persistent_pass"]:
+        st.warning(
+            "Persistent-quality gate: FAIL"
+            + (f" — {result['gate_reasons']}" if result["gate_reasons"] else "")
+        )
+        st.caption(
+            "Quality/entry values below are diagnostic only. A failed "
+            "persistent-quality gate cannot become an official scanner candidate."
+        )
+
+    t1, t2, t3, t4, t5 = st.columns(5)
+    t1.metric(
+        "Previous close",
+        f"${liq['prev_close']:,.2f}" if pd.notna(liq["prev_close"]) else "—",
+    )
+    t2.metric(
+        "Previous $ volume",
+        _money_m2(liq["prev_dollar_volume"]),
+    )
+    t3.metric(
+        "20D avg $ volume",
+        _money_m(row.get("avg_dollar_volume20")),
+    )
+    t4.metric(
+        "ATR %",
+        f"{row.get('atr_pct'):.2f}%"
+        if pd.notna(row.get("atr_pct"))
+        else "—",
+    )
+    t5.metric(
+        "History",
+        f"{int(row.get('bars', 0))} bars",
+    )
+
+    st.markdown("#### Quality Engine snapshot")
+    q1, q2, q3, q4, q5 = st.columns(5)
+    q1.metric(
+        "Candidate Quality",
+        f"{diag.get('quality_score'):.1f}/100"
+        if pd.notna(diag.get("quality_score"))
+        else "—",
+    )
+    q2.metric(
+        "Leadership",
+        f"{row.get('leadership_score'):.1f}/100"
+        if pd.notna(row.get("leadership_score"))
+        else "—",
+    )
+    q3.metric(
+        "Entry Quality",
+        f"{diag.get('entry_score'):.1f}/100"
+        if pd.notna(diag.get("entry_score"))
+        else "—",
+    )
+    q4.metric(
+        "Legacy RS",
+        f"{row.get('rs_score'):.1f} %ile"
+        if result["has_reference"] and pd.notna(row.get("rs_score"))
+        else "—",
+    )
+    q5.metric(
+        "Official scanner status",
+        (
+            str(diag.get("bucket", "—"))
+            if result["persistent_pass"] and liq["status"] == "PASS"
+            else "NOT ELIGIBLE"
+        ),
+    )
+
+    if pd.notna(diag.get("quality_score")):
+        st.write(
+            f"**Why quality:** {diag.get('quality_reasons', '') or '—'}"
+        )
+        st.write(
+            f"**Why entry:** {diag.get('entry_reasons', '') or '—'}"
+        )
+        if diag.get("chase_reasons"):
+            st.warning("Anti-chase gate: " + str(diag["chase_reasons"]))
+
+    with st.expander(
+        "Leadership & Resilience — Explainable View",
+        expanded=True,
+    ):
+        l1, l2, l3, l4, l5 = st.columns(5)
+        l1.metric("Leadership grade", row.get("leadership_grade", "N/A"))
+        l2.metric(
+            "RS vs SPY • 20D",
+            f"{row.get('rs_vs_spy_20_pct'):+.1f}%"
+            if pd.notna(row.get("rs_vs_spy_20_pct"))
+            else "—",
+        )
+        l3.metric(
+            "RS vs SPY • 50D",
+            f"{row.get('rs_vs_spy_50_pct'):+.1f}%"
+            if pd.notna(row.get("rs_vs_spy_50_pct"))
+            else "—",
+        )
+        l4.metric(
+            "RS vs SPY • 100D",
+            f"{row.get('rs_vs_spy_100_pct'):+.1f}%"
+            if pd.notna(row.get("rs_vs_spy_100_pct"))
+            else "—",
+        )
+        l5.metric(
+            "Leadership Data Confidence",
+            row.get("leadership_confidence", "LOW"),
+        )
+
+        old_rs20 = row.get("rs20_10d_ago_pct")
+        now_rs20 = row.get("rs_vs_spy_20_pct")
+        change_pp = row.get("rs20_change_10d_pp")
+        if pd.notna(old_rs20) and pd.notna(now_rs20) and pd.notna(change_pp):
+            state = (
+                "ACCELERATING" if change_pp >= 1.0
+                else "DECELERATING" if change_pp <= -1.0
+                else "STABLE"
+            )
+            st.write(
+                f"**Relative momentum:** RS20 {old_rs20:+.1f}% → "
+                f"{now_rs20:+.1f}% over 10 sessions "
+                f"({change_pp:+.1f}pp) — **{state}**"
+            )
+
+        stress_days = int(row.get("stress_day_count", 0) or 0)
+        stress_wins = int(row.get("stress_win_count", 0) or 0)
+        stress_rate = row.get("stress_outperform_pct")
+        stress_excess = row.get("stress_excess_mean_pct")
+        capture_pct = row.get("downside_capture_pct")
+        capture_label = row.get("downside_capture_label", "N/A")
+        st.write(
+            "**Market stress:** "
+            + (
+                f"beat SPY {stress_wins}/{stress_days} sessions "
+                f"({stress_rate:.0f}%), avg excess {stress_excess:+.2f}%, "
+                f"downside capture {capture_pct:.0f}% — {capture_label}"
+                if stress_days
+                and pd.notna(stress_rate)
+                and pd.notna(stress_excess)
+                and pd.notna(capture_pct)
+                else "insufficient stress data"
+            )
+        )
+        if pd.notna(capture_pct):
+            st.caption(
+                f"On selected SPY stress sessions the stock lost about "
+                f"{capture_pct / 100.0:.2f}× as much as SPY in aggregate."
+            )
+
+        rs_index = row.get("rs_line_index")
+        rs_gap = row.get("rs_line_high_gap_pct")
+        if pd.notna(rs_index) and pd.notna(rs_gap):
+            st.write(
+                f"**RS line:** {rs_index:.1f}/100 — "
+                f"{abs(rs_gap):.1f}% below its 100D relative-strength peak."
+            )
+
+        st.write(
+            f"**Leadership strengths:** "
+            f"{row.get('leadership_reasons', '') or '—'}"
+        )
+        if row.get("leadership_risks"):
+            st.warning(
+                "Leadership watch-outs: "
+                + str(row["leadership_risks"])
+            )
+
+    if result["persistent_pass"] and liq["status"] == "PASS":
+        st.success(
+            f"Inspector conclusion: {diag.get('decision', '—')} • "
+            f"Bucket: {diag.get('bucket', '—')}"
+        )
+    else:
+        st.info(
+            "Inspector conclusion: diagnostic only — this ticker does not "
+            "currently satisfy every scanner gate."
+        )
+
+    st.plotly_chart(
+        chart(result["bars"], symbol),
+        use_container_width=True,
+        key=f"inspector_chart_{symbol}",
+    )
+
+
+
 res = st.session_state.scan
+
+if st.session_state.inspector_requested:
+    if not st.session_state.inspector_ticker:
+        st.error("Enter a valid ticker symbol, for example AMZN.")
+    else:
+        try:
+            inspector_result = inspect_ticker(
+                client,
+                cfg,
+                st.session_state.inspector_ticker,
+                res,
+            )
+            render_ticker_inspector(inspector_result, cfg)
+            st.divider()
+        except Exception as exc:
+            st.error(f"Ticker Inspector failed safely: {exc}")
+            st.caption(
+                "The scanner result was not changed. Ticker Inspector is "
+                "read-only by design."
+            )
+
 if not res:
-    st.info("Click **Run Scanner** to begin.")
+    st.info(
+        "Ticker Inspector can provide direct diagnostics now. Run Scanner "
+        "when you want the full cross-sectional percentile reference and the "
+        "normal universe dashboard."
+    )
     st.stop()
 
 regime = res["regime"]
