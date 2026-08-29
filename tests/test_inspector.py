@@ -5,6 +5,13 @@ import numpy as np
 from scanner.inspector import (
     in_selected_universe,
     inspector_authority,
+    AUTO_REFERENCE_LABEL,
+    reference_confidence,
+    reference_coverage,
+    reference_is_usable,
+    reference_signature,
+    resolve_reference_universe,
+    scan_reference_compatible,
     liquidity_diagnostic,
     normalize_ticker,
     pct_rank_against_reference,
@@ -87,6 +94,52 @@ class TickerInspectorTests(unittest.TestCase):
         self.assertEqual(state["persistent_quality"], "PASS")
         self.assertEqual(state["official_status"], "A-QUALITY — WAIT")
         self.assertTrue(state["candidate_quality_authoritative"])
+
+    def test_reference_auto_resolution(self):
+        self.assertEqual(
+            resolve_reference_universe("S&P 500", AUTO_REFERENCE_LABEL),
+            "S&P 500",
+        )
+        self.assertEqual(
+            resolve_reference_universe("S&P 500", "NASDAQ-100"),
+            "NASDAQ-100",
+        )
+
+    def test_reference_signature_is_population_specific(self):
+        a = reference_signature("S&P 500", 5.0, 20_000_000, 2000, 280)
+        b = reference_signature("S&P 500", 5.0, 20_000_000, 1000, 280)
+        c = reference_signature("NASDAQ-100", 5.0, 20_000_000, 2000, 280)
+        self.assertNotEqual(a, b)
+        self.assertNotEqual(a, c)
+
+    def test_reference_integrity_gate(self):
+        self.assertAlmostEqual(reference_coverage(495, 495), 1.0)
+        self.assertEqual(reference_confidence(495, 495), "HIGH")
+        self.assertTrue(reference_is_usable(495, 495))
+        self.assertEqual(reference_confidence(27, 30), "MEDIUM")
+        self.assertTrue(reference_is_usable(27, 30))
+        self.assertFalse(reference_is_usable(18, 20))
+        self.assertFalse(reference_is_usable(100, 200))
+
+    def test_scan_reference_compatibility(self):
+        import pandas as pd
+
+        sig = reference_signature("S&P 500", 5.0, 20_000_000, 2000, 280)
+        scan = {
+            "universe_name": "S&P 500",
+            "reference_signature": sig,
+            "cross_section": pd.DataFrame({"symbol": ["AAPL", "MSFT"]}),
+        }
+        self.assertTrue(scan_reference_compatible(scan, "S&P 500", sig))
+        self.assertFalse(
+            scan_reference_compatible(scan, "NASDAQ-100", sig)
+        )
+        bad_sig = reference_signature(
+            "S&P 500", 5.0, 20_000_000, 1000, 280
+        )
+        self.assertFalse(
+            scan_reference_compatible(scan, "S&P 500", bad_sig)
+        )
 
 
 if __name__ == "__main__":
