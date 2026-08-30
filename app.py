@@ -60,6 +60,9 @@ reference_coverage = inspector_module.reference_coverage
 reference_confidence = inspector_module.reference_confidence
 reference_is_usable = inspector_module.reference_is_usable
 fetch_sec_ticker_map = fundamentals_module.fetch_sec_ticker_map
+resolve_sec_identity = fundamentals_module.resolve_sec_identity
+SecAccessError = fundamentals_module.SecAccessError
+SecIdentityNotFound = fundamentals_module.SecIdentityNotFound
 fetch_sec_companyfacts = fundamentals_module.fetch_sec_companyfacts
 build_fundamental_snapshot = fundamentals_module.build_fundamental_snapshot
 unavailable_fundamental_snapshot = fundamentals_module.unavailable_snapshot
@@ -78,7 +81,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.2.1"
+APP_VERSION = "V1.2.2.1a"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -88,12 +91,12 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Fundamental Growth & Earnings Quality • Shadow Validation"
+    "• Trade With Edge • Candidate Quality Engine • Fundamental Growth & Earnings Quality • SEC Access Integrity Hotfix"
 )
 st.caption(
-    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.2.1 Fundamental "
-    "Growth & Earnings Quality (shadow validation) • Frozen V1.2.1 "
-    "Leadership and all scanner classifications remain unchanged"
+    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.2.1a SEC Access "
+    "Integrity Hotfix • Fundamental model remains SHADOW MODE • Frozen "
+    "V1.2.1 Leadership and scanner classifications remain unchanged"
 )
 
 
@@ -150,13 +153,23 @@ def load_named_universe(name):
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
-def load_sec_ticker_map_cached(user_agent):
-    return fetch_sec_ticker_map(user_agent=user_agent)
+def resolve_sec_identity_cached(ticker, user_agent):
+    # Cache the successful per-ticker identity so Streamlit reruns do not
+    # repeatedly download SEC association files.
+    return resolve_sec_identity(
+        ticker,
+        user_agent=user_agent,
+        timeout=12.0,
+    )
 
 
 @st.cache_data(ttl=21600, show_spinner=False)
 def load_sec_companyfacts_cached(cik, user_agent):
-    return fetch_sec_companyfacts(cik, user_agent=user_agent)
+    return fetch_sec_companyfacts(
+        cik,
+        user_agent=user_agent,
+        timeout=15.0,
+    )
 
 
 def load_fundamental_snapshot(symbol):
@@ -165,18 +178,31 @@ def load_fundamental_snapshot(symbol):
     user_agent = secret("SEC_USER_AGENT", DEFAULT_SEC_USER_AGENT)
 
     try:
-        ticker_map = load_sec_ticker_map_cached(user_agent)
+        identity = resolve_sec_identity_cached(ticker, user_agent)
+    except SecIdentityNotFound as exc:
+        return unavailable_fundamental_snapshot(
+            ticker,
+            str(exc),
+            sec_access_status="IDENTITY NOT FOUND",
+            identity_access_status="PASS / NOT FOUND",
+            companyfacts_access_status="NOT ATTEMPTED",
+        )
+    except SecAccessError as exc:
+        return unavailable_fundamental_snapshot(
+            ticker,
+            exc.compact(),
+            sec_access_status="SEC IDENTITY ACCESS FAILED",
+            identity_access_status="FAILED",
+            companyfacts_access_status="NOT ATTEMPTED",
+            identity_diagnostics=exc.compact(),
+        )
     except Exception as exc:
         return unavailable_fundamental_snapshot(
             ticker,
-            f"SEC ticker-map request failed: {exc}",
-        )
-
-    identity = ticker_map.get(ticker)
-    if identity is None:
-        return unavailable_fundamental_snapshot(
-            ticker,
-            "Ticker was not found in the official SEC ticker/CIK mapping.",
+            f"Unexpected SEC identity failure: {exc}",
+            sec_access_status="SEC IDENTITY ACCESS FAILED",
+            identity_access_status="FAILED",
+            companyfacts_access_status="NOT ATTEMPTED",
         )
 
     try:
@@ -184,20 +210,46 @@ def load_fundamental_snapshot(symbol):
             identity["cik"],
             user_agent,
         )
+    except SecAccessError as exc:
+        return unavailable_fundamental_snapshot(
+            ticker,
+            exc.compact(),
+            cik=identity["cik"],
+            company_name=identity.get("title"),
+            sec_access_status="SEC COMPANYFACTS ACCESS FAILED",
+            identity_access_status="PASS",
+            companyfacts_access_status="FAILED",
+            identity_source=identity.get("identity_source"),
+            identity_diagnostics=identity.get("identity_diagnostics", ""),
+        )
     except Exception as exc:
         return unavailable_fundamental_snapshot(
             ticker,
-            f"SEC CompanyFacts request failed: {exc}",
+            f"Unexpected SEC CompanyFacts failure: {exc}",
             cik=identity["cik"],
             company_name=identity.get("title"),
+            sec_access_status="SEC COMPANYFACTS ACCESS FAILED",
+            identity_access_status="PASS",
+            companyfacts_access_status="FAILED",
+            identity_source=identity.get("identity_source"),
+            identity_diagnostics=identity.get("identity_diagnostics", ""),
         )
 
-    return build_fundamental_snapshot(
+    snapshot = build_fundamental_snapshot(
         ticker,
         companyfacts,
         cik=identity["cik"],
         company_name=identity.get("title"),
     )
+    snapshot["identity_source"] = identity.get("identity_source")
+    snapshot["identity_access_status"] = "PASS"
+    snapshot["companyfacts_access_status"] = "PASS"
+    snapshot["sec_access_status"] = "PASS"
+    snapshot["identity_diagnostics"] = identity.get(
+        "identity_diagnostics",
+        "",
+    )
+    return snapshot
 
 
 def _symbol_key(symbol):
@@ -358,12 +410,12 @@ def _fund_pp(value):
 
 
 def render_fundamental_quality(symbol, *, expanded=True, key_prefix="fund"):
-    """Render V1.2.2.1 fundamentals in read-only SHADOW MODE."""
+    """Render V1.2.2.1a fundamentals in read-only SHADOW MODE."""
     with st.spinner(f"Loading official SEC fundamentals for {symbol}..."):
         fund = load_fundamental_snapshot(symbol)
 
     with st.expander(
-        "V1.2.2.1 Fundamental Growth & Earnings Quality — Explainable View",
+        "V1.2.2.1a Fundamental Growth & Earnings Quality — Explainable View",
         expanded=expanded,
     ):
         st.caption(
@@ -392,6 +444,37 @@ def render_fundamental_quality(symbol, *, expanded=True, key_prefix="fund"):
             "Metric coverage",
             f"{fund.get('available_weight_pct', 0):.0f}%",
         )
+
+        st.markdown("#### SEC Access Integrity")
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric(
+            "Overall SEC access",
+            fund.get("sec_access_status", "UNKNOWN"),
+        )
+        a2.metric(
+            "Ticker → CIK",
+            fund.get("identity_access_status", "UNKNOWN"),
+        )
+        a3.metric(
+            "CompanyFacts",
+            fund.get("companyfacts_access_status", "UNKNOWN"),
+        )
+        a4.metric(
+            "Identity source",
+            fund.get("identity_source") or "—",
+        )
+
+        if fund.get("sec_access_status") != "PASS":
+            st.error(
+                "SEC access did not complete. This is a transport/identity "
+                "failure, NOT evidence that the company lacks fundamentals. "
+                + str(fund.get("access_detail") or "")
+            )
+        elif fund.get("identity_diagnostics"):
+            st.caption(
+                "SEC identity fallback diagnostics: "
+                + str(fund.get("identity_diagnostics"))
+            )
 
         st.markdown("#### Revenue growth")
         r1, r2, r3, r4 = st.columns(4)
@@ -1927,7 +2010,7 @@ if not lead_valid.empty:
 
 st.markdown("### 3B) Fundamental Quality — Revenue & Earnings")
 st.info(
-    "V1.2.2.1 SHADOW MODE: fundamentals are loaded on demand for the selected "
+    "V1.2.2.1a SHADOW MODE: fundamentals are loaded on demand for the selected "
     "candidate or Ticker Inspector from official SEC EDGAR CompanyFacts. "
     "This first validation build does not batch-fetch fundamentals for the "
     "entire universe and does not alter scanner eligibility or ranking."
