@@ -18,6 +18,7 @@ import scanner.config as scanner_config
 import scanner.indicators as indicators_module
 import scanner.inspector as inspector_module
 import scanner.fundamentals as fundamentals_module
+import scanner.fundamental_validation as fundamental_validation_module
 import scanner.leadership as leadership_module
 import scanner.regime as regime_module
 import scanner.scoring as scoring_module
@@ -29,6 +30,7 @@ for _module in (
     indicators_module,
     inspector_module,
     fundamentals_module,
+    fundamental_validation_module,
     leadership_module,
     regime_module,
     scoring_module,
@@ -72,6 +74,9 @@ build_fundamental_snapshot = fundamentals_module.build_fundamental_snapshot
 unavailable_fundamental_snapshot = fundamentals_module.unavailable_snapshot
 normalize_sec_ticker = fundamentals_module.normalize_sec_ticker
 DEFAULT_SEC_USER_AGENT = fundamentals_module.DEFAULT_SEC_USER_AGENT
+FUND_VALIDATION_CASES = fundamental_validation_module.VALIDATION_CASES
+fund_validation_row = fundamental_validation_module.validation_row
+summarize_fund_validation = fundamental_validation_module.summarize_validation_rows
 add_leadership_features = leadership_module.add_leadership_features
 aggregate_regime = regime_module.aggregate_regime
 with_breadth = regime_module.with_breadth
@@ -85,7 +90,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.2.1b1"
+APP_VERSION = "V1.2.2.2"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -95,13 +100,13 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Fundamental Growth & Earnings Quality • SEC Fair Access Connectivity Validation"
+    "• Trade With Edge • Candidate Quality Engine • Fundamental Growth & Earnings Quality • Metric Integrity & Cross-Company Validation"
 )
 st.caption(
-    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.2.1b1 SEC Fair "
-    "Access / CompanyFacts Connectivity Validation • Financial values remain "
-    "official SEC CompanyFacts • Fundamental model remains SHADOW MODE • "
-    "Frozen scanner classifications remain unchanged"
+    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.2.2 Fundamental "
+    "Metric Integrity & Cross-Company Validation • Official SEC CompanyFacts "
+    "only • Fundamental model remains SHADOW MODE • Frozen scanner "
+    "classifications remain unchanged"
 )
 
 
@@ -188,6 +193,14 @@ def resolve_sec_identity_mirror_cached(ticker):
         "contact is configured."
     )
     return out
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def load_sec_ticker_map_cached(user_agent):
+    return fetch_sec_ticker_map(
+        user_agent=user_agent,
+        timeout=12.0,
+    )
 
 
 @st.cache_data(ttl=21600, show_spinner=False)
@@ -318,6 +331,162 @@ def load_fundamental_snapshot(symbol):
     snapshot["companyfacts_transport_diagnosis"] = "PASS"
     snapshot["identity_diagnostics"] = identity.get("identity_diagnostics", "")
     return snapshot
+
+
+
+def load_validation_fundamental_snapshot(symbol, identity, declared):
+    """Validation-suite path: reuse one official identity map, fetch facts once."""
+    ticker = normalize_sec_ticker(symbol)
+    user_agent = declared.get("user_agent", "")
+
+    if not declared.get("ready"):
+        return unavailable_fundamental_snapshot(
+            ticker,
+            declared.get("reason") or "SEC Fair Access configuration required",
+            cik=identity.get("cik") if identity else None,
+            sec_access_status="SEC FAIR ACCESS CONFIG REQUIRED",
+            fair_access_status="CONFIG REQUIRED",
+            fair_access_source=declared.get("source"),
+            companyfacts_transport_diagnosis="NOT ATTEMPTED",
+            identity_access_status="PASS" if identity else "UNKNOWN",
+            companyfacts_access_status="NOT ATTEMPTED",
+            identity_source="SEC cached ticker map" if identity else None,
+            identity_authority="OFFICIAL SEC" if identity else None,
+        )
+
+    if not identity:
+        return unavailable_fundamental_snapshot(
+            ticker,
+            "Ticker was not present in the official SEC ticker/CIK map.",
+            sec_access_status="IDENTITY NOT FOUND",
+            fair_access_status="PASS",
+            fair_access_source=declared.get("source"),
+            fair_access_contact=declared.get("contact_email"),
+            companyfacts_transport_diagnosis="NOT ATTEMPTED",
+            identity_access_status="PASS / NOT FOUND",
+            companyfacts_access_status="NOT ATTEMPTED",
+            identity_source="SEC cached ticker map",
+            identity_authority="OFFICIAL SEC",
+        )
+
+    try:
+        companyfacts = load_sec_companyfacts_cached(identity["cik"], user_agent)
+    except SecAccessError as exc:
+        return unavailable_fundamental_snapshot(
+            ticker,
+            exc.compact(),
+            cik=identity["cik"],
+            company_name=identity.get("title"),
+            sec_access_status="SEC COMPANYFACTS ACCESS FAILED",
+            fair_access_status="PASS",
+            fair_access_source=declared.get("source"),
+            fair_access_contact=declared.get("contact_email"),
+            companyfacts_transport_diagnosis=classify_sec_transport_failure(
+                stage=exc.stage,
+                status_code=exc.status_code,
+                declaration_ready=True,
+            ),
+            identity_access_status="PASS",
+            companyfacts_access_status="FAILED",
+            identity_source="SEC cached ticker map",
+            identity_authority="OFFICIAL SEC",
+        )
+
+    snapshot = build_fundamental_snapshot(
+        ticker,
+        companyfacts,
+        cik=identity["cik"],
+        company_name=identity.get("title"),
+    )
+    snapshot["identity_source"] = "SEC cached ticker map"
+    snapshot["identity_authority"] = "OFFICIAL SEC"
+    snapshot["identity_access_status"] = "PASS"
+    snapshot["companyfacts_access_status"] = "PASS"
+    snapshot["sec_access_status"] = "PASS"
+    snapshot["fair_access_status"] = "PASS"
+    snapshot["fair_access_source"] = declared.get("source")
+    snapshot["fair_access_contact"] = declared.get("contact_email")
+    snapshot["companyfacts_transport_diagnosis"] = "PASS"
+    return snapshot
+
+
+def render_fundamental_validation_suite():
+    """Explicit-action V1.2.2.2 live SEC cross-company validation utility."""
+    st.subheader(
+        "🧪 V1.2.2.2 Fundamental Metric Integrity & Cross-Company Validation"
+    )
+    st.caption(
+        "READ-ONLY VALIDATION LAB: this suite does not alter Persistent Quality, "
+        "Candidate Quality, Leadership, Entry Quality, buckets, or trade decisions. "
+        "It checks extraction integrity across deliberately different issuer/reporting profiles."
+    )
+
+    declared = build_sec_declared_user_agent(
+        contact_email=secret("SEC_CONTACT_EMAIL"),
+        explicit_user_agent=secret("SEC_USER_AGENT"),
+        organization=secret("SEC_ORGANIZATION", "TradeWithEdge"),
+    )
+    if not declared.get("ready"):
+        st.warning(
+            "SEC Fair Access declaration is not ready. Configure SEC_CONTACT_EMAIL "
+            "before running the validation suite."
+        )
+        return
+
+    try:
+        with st.spinner("Loading one official SEC ticker/CIK map for the validation suite..."):
+            identity_map = load_sec_ticker_map_cached(declared["user_agent"])
+    except Exception as exc:
+        st.error(f"Validation suite could not load the official SEC identity map: {exc}")
+        return
+
+    rows = []
+    for case in FUND_VALIDATION_CASES:
+        ticker = case["ticker"]
+        with st.spinner(f"Validating {ticker} — {case['profile']}..."):
+            snap = load_validation_fundamental_snapshot(
+                ticker,
+                identity_map.get(normalize_sec_ticker(ticker)),
+                declared,
+            )
+        rows.append(fund_validation_row(case, snap))
+
+    summary = summarize_fund_validation(rows)
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Overall validation", summary["overall"])
+    s2.metric("PASS", summary["pass"])
+    s3.metric("REVIEW", summary["review"])
+    s4.metric("FAIL", summary["fail"])
+
+    if summary["fail"]:
+        st.error(
+            "At least one case has an access or extraction-integrity FAIL. "
+            "Do not promote Fundamental Quality into Candidate Quality."
+        )
+    elif summary["review"]:
+        st.warning(
+            "No extraction FAIL was detected, but at least one reporting/domain "
+            "profile requires REVIEW. This is an expected outcome if a sector "
+            "needs a specialized SEC concept map; the engine must remain explicit "
+            "rather than fabricate missing fundamentals."
+        )
+    else:
+        st.success(
+            "All validation cases passed structural extraction checks. "
+            "This still remains SHADOW MODE until live results are reviewed."
+        )
+
+    st.dataframe(
+        pd.DataFrame(rows),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.caption(
+        "PASS = usable SEC facts with structurally valid period pairing. "
+        "REVIEW = explainable coverage/domain gap or lower confidence. "
+        "FAIL = access failure or a suspicious period pair actually used by the engine."
+    )
+
 
 
 def _symbol_key(symbol):
@@ -478,12 +647,12 @@ def _fund_pp(value):
 
 
 def render_fundamental_quality(symbol, *, expanded=True, key_prefix="fund"):
-    """Render V1.2.2.1b1 fundamentals in read-only SHADOW MODE."""
+    """Render V1.2.2.2 fundamentals in read-only SHADOW MODE."""
     with st.spinner(f"Loading official SEC fundamentals for {symbol}..."):
         fund = load_fundamental_snapshot(symbol)
 
     with st.expander(
-        "V1.2.2.1b1 Fundamental Growth & Earnings Quality — Explainable View",
+        "V1.2.2.2 Fundamental Growth & Earnings Quality — Metric Integrity View",
         expanded=expanded,
     ):
         st.caption(
@@ -539,7 +708,7 @@ def render_fundamental_quality(symbol, *, expanded=True, key_prefix="fund"):
         )
         b3.metric(
             "Declared contact",
-            fund.get("fair_access_contact") or "—",
+            "CONFIGURED" if fund.get("fair_access_contact") else "—",
         )
 
         identity_authority = fund.get("identity_authority")
@@ -691,6 +860,54 @@ def render_fundamental_quality(symbol, *, expanded=True, key_prefix="fund"):
             ),
         )
 
+        st.markdown("#### Metric Integrity Audit")
+        i1, i2, i3, i4 = st.columns(4)
+        integrity_status = fund.get("metric_integrity_status", "NOT AVAILABLE")
+        i1.metric("Extraction integrity", integrity_status)
+        i2.metric("Fiscal calendar", fund.get("fiscal_calendar", "UNKNOWN"))
+        i3.metric(
+            "Latest filing age",
+            (
+                f"{int(fund['latest_filed_age_days'])} days"
+                if fund.get("latest_filed_age_days") is not None
+                else "—"
+            ),
+        )
+        checks = fund.get("metric_integrity_checks") or {}
+        pass_count = sum(
+            1 for item in checks.values()
+            if item.get("status") == "PASS"
+        )
+        i4.metric(
+            "Structural pair checks",
+            f"{pass_count}/{len(checks)} PASS" if checks else "—",
+        )
+
+        if integrity_status == "FAIL":
+            st.error(
+                "Metric integrity FAIL — "
+                + str(fund.get("metric_integrity_summary") or "")
+            )
+        elif integrity_status == "REVIEW":
+            st.warning(
+                "Metric integrity REVIEW — "
+                + str(fund.get("metric_integrity_summary") or "")
+            )
+        elif integrity_status == "PASS":
+            st.success(str(fund.get("metric_integrity_summary") or "PASS"))
+
+        provenance_rows = fund.get("metric_integrity_rows") or []
+        if provenance_rows:
+            st.dataframe(
+                pd.DataFrame(provenance_rows),
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.caption(
+                "This table shows the exact SEC concept, unit, current/prior "
+                "periods, duration, filing form and accession used by each YoY calculation."
+            )
+
         if fund.get("fundamental_reasons"):
             st.write(
                 "**Fundamental strengths:** "
@@ -775,6 +992,10 @@ if "inspector_query_input" not in st.session_state:
     st.session_state.inspector_query_input = st.session_state.inspector_ticker
 
 
+if "fund_validation_requested" not in st.session_state:
+    st.session_state.fund_validation_requested = False
+
+
 def _submit_inspector_callback():
     normalized = normalize_ticker(
         st.session_state.get("inspector_query_input", "")
@@ -789,6 +1010,14 @@ def _clear_inspector_callback():
     st.session_state.inspector_ticker = ""
     st.session_state.inspector_requested = False
     st.session_state.inspector_expanded = False
+
+
+def _run_fund_validation_callback():
+    st.session_state.fund_validation_requested = True
+
+
+def _clear_fund_validation_callback():
+    st.session_state.fund_validation_requested = False
 
 
 with st.sidebar:
@@ -885,6 +1114,25 @@ with st.sidebar:
         key="clear_inspector_button",
         help="Hide and clear the Inspector without changing scanner results.",
         on_click=_clear_inspector_callback,
+    )
+
+    st.divider()
+    st.subheader("🧪 Fundamental Validation")
+    st.caption(
+        "V1.2.2.2 live SEC cross-company validation: "
+        "AMZN, MSFT, NVDA, UBER and JPM."
+    )
+    st.button(
+        "Run validation suite",
+        use_container_width=True,
+        key="run_fund_validation_button",
+        on_click=_run_fund_validation_callback,
+    )
+    st.button(
+        "Clear validation",
+        use_container_width=True,
+        key="clear_fund_validation_button",
+        on_click=_clear_fund_validation_callback,
     )
 
 
@@ -1893,6 +2141,10 @@ if st.session_state.inspector_requested:
                 "The scanner result was not changed. Ticker Inspector is "
                 "read-only by design."
             )
+
+if st.session_state.fund_validation_requested:
+    render_fundamental_validation_suite()
+    st.divider()
 
 if not res:
     st.info(
