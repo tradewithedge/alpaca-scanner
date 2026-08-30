@@ -17,6 +17,7 @@ import scanner.audit as audit_module
 import scanner.config as scanner_config
 import scanner.indicators as indicators_module
 import scanner.inspector as inspector_module
+import scanner.fundamentals as fundamentals_module
 import scanner.leadership as leadership_module
 import scanner.regime as regime_module
 import scanner.scoring as scoring_module
@@ -27,6 +28,7 @@ for _module in (
     scanner_config,
     indicators_module,
     inspector_module,
+    fundamentals_module,
     leadership_module,
     regime_module,
     scoring_module,
@@ -57,6 +59,12 @@ scan_reference_compatible = inspector_module.scan_reference_compatible
 reference_coverage = inspector_module.reference_coverage
 reference_confidence = inspector_module.reference_confidence
 reference_is_usable = inspector_module.reference_is_usable
+fetch_sec_ticker_map = fundamentals_module.fetch_sec_ticker_map
+fetch_sec_companyfacts = fundamentals_module.fetch_sec_companyfacts
+build_fundamental_snapshot = fundamentals_module.build_fundamental_snapshot
+unavailable_fundamental_snapshot = fundamentals_module.unavailable_snapshot
+normalize_sec_ticker = fundamentals_module.normalize_sec_ticker
+DEFAULT_SEC_USER_AGENT = fundamentals_module.DEFAULT_SEC_USER_AGENT
 add_leadership_features = leadership_module.add_leadership_features
 aggregate_regime = regime_module.aggregate_regime
 with_breadth = regime_module.with_breadth
@@ -70,7 +78,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.1.3c"
+APP_VERSION = "V1.2.2.1"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -80,12 +88,12 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Self-Contained Ticker Inspector Reference Engine • Explicit-Action UX"
+    "• Trade With Edge • Candidate Quality Engine • Fundamental Growth & Earnings Quality • Shadow Validation"
 )
 st.caption(
-    "Roadmap utility: V1.2.1.3c Ticker Inspector Explicit-Action UX • "
-    "Run Scanner never creates/reactivates Inspector • Frozen V1.2.1 "
-    "leadership and scanner classifications remain unchanged"
+    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.2.1 Fundamental "
+    "Growth & Earnings Quality (shadow validation) • Frozen V1.2.1 "
+    "Leadership and all scanner classifications remain unchanged"
 )
 
 
@@ -139,6 +147,57 @@ def load_bars(_client, syms, days, bs):
 @st.cache_data(ttl=21600, show_spinner=False)
 def load_named_universe(name):
     return fetch_universe(name)
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def load_sec_ticker_map_cached(user_agent):
+    return fetch_sec_ticker_map(user_agent=user_agent)
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def load_sec_companyfacts_cached(cik, user_agent):
+    return fetch_sec_companyfacts(cik, user_agent=user_agent)
+
+
+def load_fundamental_snapshot(symbol):
+    """On-demand official SEC fundamentals; never changes scanner state."""
+    ticker = normalize_sec_ticker(symbol)
+    user_agent = secret("SEC_USER_AGENT", DEFAULT_SEC_USER_AGENT)
+
+    try:
+        ticker_map = load_sec_ticker_map_cached(user_agent)
+    except Exception as exc:
+        return unavailable_fundamental_snapshot(
+            ticker,
+            f"SEC ticker-map request failed: {exc}",
+        )
+
+    identity = ticker_map.get(ticker)
+    if identity is None:
+        return unavailable_fundamental_snapshot(
+            ticker,
+            "Ticker was not found in the official SEC ticker/CIK mapping.",
+        )
+
+    try:
+        companyfacts = load_sec_companyfacts_cached(
+            identity["cik"],
+            user_agent,
+        )
+    except Exception as exc:
+        return unavailable_fundamental_snapshot(
+            ticker,
+            f"SEC CompanyFacts request failed: {exc}",
+            cik=identity["cik"],
+            company_name=identity.get("title"),
+        )
+
+    return build_fundamental_snapshot(
+        ticker,
+        companyfacts,
+        cik=identity["cik"],
+        company_name=identity.get("title"),
+    )
 
 
 def _symbol_key(symbol):
@@ -284,6 +343,188 @@ def liquid_universe(client, cfg, selected_symbols=None):
     }
     return passed, audit
 
+
+
+def _fund_pct(value):
+    if value is None or pd.isna(value):
+        return "—"
+    return f"{100.0 * float(value):+.1f}%"
+
+
+def _fund_pp(value):
+    if value is None or pd.isna(value):
+        return "—"
+    return f"{100.0 * float(value):+.1f}pp"
+
+
+def render_fundamental_quality(symbol, *, expanded=True, key_prefix="fund"):
+    """Render V1.2.2.1 fundamentals in read-only SHADOW MODE."""
+    with st.spinner(f"Loading official SEC fundamentals for {symbol}..."):
+        fund = load_fundamental_snapshot(symbol)
+
+    with st.expander(
+        "V1.2.2.1 Fundamental Growth & Earnings Quality — Explainable View",
+        expanded=expanded,
+    ):
+        st.caption(
+            "SHADOW MODE: official SEC financial-performance diagnostics are "
+            "displayed for validation only. They do NOT yet change Persistent "
+            "Quality, Candidate Quality, Leadership, Entry Quality, buckets, "
+            "or trade decisions. Earnings/event DATE reliability remains a "
+            "separate roadmap layer."
+        )
+
+        f1, f2, f3, f4 = st.columns(4)
+        f1.metric(
+            "Fundamental Quality (shadow)",
+            (
+                f"{fund['fundamental_score']:.1f}/100"
+                if pd.notna(fund.get("fundamental_score"))
+                else "N/A"
+            ),
+        )
+        f2.metric("Fundamental grade", fund.get("fundamental_grade", "N/A"))
+        f3.metric(
+            "Fundamental Data Confidence",
+            fund.get("fundamental_confidence", "UNKNOWN"),
+        )
+        f4.metric(
+            "Metric coverage",
+            f"{fund.get('available_weight_pct', 0):.0f}%",
+        )
+
+        st.markdown("#### Revenue growth")
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric("Latest quarter YoY", _fund_pct(fund.get("revenue_q_yoy")))
+        r2.metric(
+            "Previous quarter YoY",
+            _fund_pct(fund.get("revenue_q_prior_yoy")),
+        )
+        r3.metric(
+            "Growth change",
+            _fund_pp(fund.get("revenue_q_change")),
+        )
+        rev_valid = int(fund.get("revenue_valid_count", 0) or 0)
+        rev_pos = int(fund.get("revenue_positive_count", 0) or 0)
+        r4.metric(
+            "Recent positive YoY reads",
+            f"{rev_pos}/{rev_valid}" if rev_valid else "—",
+        )
+
+        if (
+            pd.notna(fund.get("revenue_q_prior_yoy"))
+            and pd.notna(fund.get("revenue_q_yoy"))
+            and pd.notna(fund.get("revenue_q_change"))
+        ):
+            rev_state = (
+                "ACCELERATING"
+                if fund["revenue_q_change"] >= 0.05
+                else "DECELERATING"
+                if fund["revenue_q_change"] <= -0.05
+                else "STABLE"
+            )
+            st.caption(
+                "Revenue momentum: "
+                f"{_fund_pct(fund['revenue_q_prior_yoy'])} → "
+                f"{_fund_pct(fund['revenue_q_yoy'])} "
+                f"({_fund_pp(fund['revenue_q_change'])}) — {rev_state}."
+            )
+
+        st.markdown("#### Earnings growth")
+        e1, e2, e3, e4 = st.columns(4)
+        earnings_metric = fund.get("earnings_metric", "Earnings")
+        latest_earnings = (
+            _fund_pct(fund.get("earnings_q_yoy"))
+            if pd.notna(fund.get("earnings_q_yoy"))
+            else fund.get("earnings_q_state", "N/A")
+        )
+        e1.metric(f"Latest quarter YoY • {earnings_metric}", latest_earnings)
+        e2.metric(
+            "Previous quarter YoY",
+            _fund_pct(fund.get("earnings_q_prior_yoy")),
+        )
+        e3.metric(
+            "Growth change",
+            _fund_pp(fund.get("earnings_q_change")),
+        )
+        earn_valid = int(fund.get("earnings_valid_count", 0) or 0)
+        earn_pos = int(fund.get("earnings_positive_count", 0) or 0)
+        e4.metric(
+            "Recent positive YoY reads",
+            f"{earn_pos}/{earn_valid}" if earn_valid else "—",
+        )
+
+        if (
+            pd.notna(fund.get("earnings_q_prior_yoy"))
+            and pd.notna(fund.get("earnings_q_yoy"))
+            and pd.notna(fund.get("earnings_q_change"))
+        ):
+            earn_state = (
+                "ACCELERATING"
+                if fund["earnings_q_change"] >= 0.05
+                else "DECELERATING"
+                if fund["earnings_q_change"] <= -0.05
+                else "STABLE"
+            )
+            st.caption(
+                f"{earnings_metric} momentum: "
+                f"{_fund_pct(fund['earnings_q_prior_yoy'])} → "
+                f"{_fund_pct(fund['earnings_q_yoy'])} "
+                f"({_fund_pp(fund['earnings_q_change'])}) — {earn_state}."
+            )
+
+        st.markdown("#### Longer-term confirmation")
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric(
+            "Latest FY revenue YoY",
+            _fund_pct(fund.get("revenue_annual_yoy")),
+        )
+        annual_earn = (
+            _fund_pct(fund.get("earnings_annual_yoy"))
+            if pd.notna(fund.get("earnings_annual_yoy"))
+            else fund.get("earnings_annual_state", "N/A")
+        )
+        a2.metric(f"Latest FY • {earnings_metric}", annual_earn)
+        a3.metric(
+            "Latest filing used",
+            (
+                str(fund.get("latest_filed"))
+                if fund.get("latest_filed")
+                else "—"
+            ),
+        )
+        a4.metric(
+            "SEC issuer / CIK",
+            (
+                f"{fund.get('ticker')} / {int(fund['cik']):010d}"
+                if fund.get("cik") is not None
+                else "—"
+            ),
+        )
+
+        if fund.get("fundamental_reasons"):
+            st.write(
+                "**Fundamental strengths:** "
+                + str(fund["fundamental_reasons"])
+            )
+        if fund.get("fundamental_risks"):
+            st.warning(
+                "Fundamental watch-outs: "
+                + str(fund["fundamental_risks"])
+            )
+
+        source_detail = (
+            f"Revenue concept: {fund.get('revenue_taxonomy') or '—'}:"
+            f"{fund.get('revenue_concept') or '—'} • "
+            f"Earnings concept: {fund.get('earnings_taxonomy') or '—'}:"
+            f"{fund.get('earnings_concept') or '—'}"
+        )
+        st.caption(
+            f"Source: {fund.get('source', 'SEC EDGAR CompanyFacts')} • "
+            f"{source_detail} • No third-party fundamental fallback."
+        )
+
+    return fund
 
 def chart(df, symbol):
     g = add_indicators(df)
@@ -1354,6 +1595,12 @@ def render_ticker_inspector(result, cfg, show_title=True):
                 + str(row["leadership_risks"])
             )
 
+    render_fundamental_quality(
+        symbol,
+        expanded=True,
+        key_prefix="inspector_fund",
+    )
+
     if not result["has_reference"]:
         st.info(
             "Inspector conclusion: DIRECT DIAGNOSTICS ONLY — automatic "
@@ -1678,6 +1925,14 @@ if not lead_valid.empty:
         "20% SPY-pullback resilience + 10% RS-line proximity to its 100D high."
     )
 
+st.markdown("### 3B) Fundamental Quality — Revenue & Earnings")
+st.info(
+    "V1.2.2.1 SHADOW MODE: fundamentals are loaded on demand for the selected "
+    "candidate or Ticker Inspector from official SEC EDGAR CompanyFacts. "
+    "This first validation build does not batch-fetch fundamentals for the "
+    "entire universe and does not alter scanner eligibility or ranking."
+)
+
 # -----------------------------------------------------------------------------
 # 4) Candidate accounting and buckets
 # -----------------------------------------------------------------------------
@@ -1929,6 +2184,12 @@ with st.expander("V1.2.1.1 Leadership & Resilience — Explainable View", expand
         "THRESHOLD means genuine SPY ≤ -1% sessions were available. "
         "Shadow-mode score still does not alter candidate classification."
     )
+
+render_fundamental_quality(
+    sel,
+    expanded=True,
+    key_prefix="candidate_fund",
+)
 
 if row["chase_reasons"]:
     st.warning("Anti-chase gate: " + row["chase_reasons"])
