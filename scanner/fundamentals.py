@@ -6,17 +6,26 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 
-FUNDAMENTALS_VERSION = "V1.2.2.1"
+FUNDAMENTALS_VERSION = "V1.2.2.1a"
 
-SEC_TICKER_URL = "https://www.sec.gov/files/company_tickers.json"
+SEC_TICKER_JSON_URL = "https://www.sec.gov/files/company_tickers.json"
+SEC_TICKER_TEXT_URL = "https://www.sec.gov/include/ticker.txt"
+SEC_TICKER_EXCHANGE_URL = "https://www.sec.gov/files/company_tickers_exchange.json"
 SEC_COMPANYFACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
 
+# SEC asks automated clients to identify themselves. A user-supplied
+# SEC_USER_AGENT Streamlit secret is preferred. The default still identifies
+# the project and provides a stable contact location without inventing an email.
 DEFAULT_SEC_USER_AGENT = (
-    "TradeWithEdge-AlpacaScanner/1.2.2.1 "
-    "(+https://github.com/tradewithedge/alpaca-scanner)"
+    "TradeWithEdge AlpacaScanner/1.2.2.1a "
+    "(contact: https://github.com/tradewithedge/alpaca-scanner)"
 )
+
+SEC_RETRYABLE_STATUS = (429, 500, 502, 503, 504)
 
 ALLOWED_FORMS = {
     "10-Q", "10-Q/A", "10-K", "10-K/A",
@@ -43,35 +52,126 @@ NET_INCOME_CONCEPTS = [
 ]
 
 
+class SecAccessError(RuntimeError):
+    """Structured SEC transport/access failure used by the dashboard."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        stage: str,
+        url: str,
+        status_code: int | None = None,
+        retryable: bool = False,
+    ):
+        super().__init__(message)
+        self.stage = stage
+        self.url = url
+        self.status_code = status_code
+        self.retryable = retryable
+
+    def compact(self) -> str:
+        status = (
+            f"HTTP {self.status_code}"
+            if self.status_code is not None
+            else "NETWORK/FORMAT"
+        )
+        return f"{self.stage}: {status} — {self}"
+
+
+class SecIdentityNotFound(LookupError):
+    pass
+
+
 def normalize_sec_ticker(ticker: str) -> str:
     """Normalize common exchange punctuation to SEC ticker style."""
     return str(ticker or "").strip().upper().replace(".", "-")
 
 
-def _headers(user_agent: str | None) -> dict:
+def _headers(user_agent: str | None, *, accept: str) -> dict:
     ua = str(user_agent or DEFAULT_SEC_USER_AGENT).strip()
     return {
         "User-Agent": ua,
         "Accept-Encoding": "gzip, deflate",
-        "Accept": "application/json",
+        "Accept": accept,
+        "Connection": "keep-alive",
     }
 
 
-def fetch_sec_ticker_map(
-    user_agent: str | None = None,
-    timeout: float = 20.0,
-) -> dict:
-    """Fetch SEC ticker -> CIK mapping. No alternative source fallback."""
-    response = requests.get(
-        SEC_TICKER_URL,
-        headers=_headers(user_agent),
-        timeout=timeout,
-    )
-    response.raise_for_status()
-    payload = response.json()
+def _build_session(user_agent: str | None, *, accept: str) -> requests.Session:
+    """Low-rate SEC session with bounded retry/backoff.
 
+    403 is deliberately NOT retried. 429 and transient server failures are.
+    """
+    retry = Retry(
+        total=3,
+        connect=2,
+        read=2,
+        status=3,
+        backoff_factor=0.8,
+        status_forcelist=SEC_RETRYABLE_STATUS,
+        allowed_methods=frozenset({"GET"}),
+        respect_retry_after_header=True,
+        raise_on_status=False,
+    )
+
+    session = requests.Session()
+    adapter = HTTPAdapter(
+        max_retries=retry,
+        pool_connections=2,
+        pool_maxsize=4,
+    )
+    session.mount("https://", adapter)
+    session.headers.update(_headers(user_agent, accept=accept))
+    return session
+
+
+def _sec_get(
+    url: str,
+    *,
+    stage: str,
+    user_agent: str | None = None,
+    timeout: float = 12.0,
+    accept: str = "application/json,text/plain;q=0.9,*/*;q=0.8",
+) -> requests.Response:
+    session = _build_session(user_agent, accept=accept)
+    try:
+        response = session.get(
+            url,
+            timeout=(5.0, float(timeout)),
+        )
+    except requests.RequestException as exc:
+        raise SecAccessError(
+            str(exc),
+            stage=stage,
+            url=url,
+            status_code=None,
+            retryable=True,
+        ) from exc
+    finally:
+        session.close()
+
+    if response.status_code >= 400:
+        retryable = response.status_code in SEC_RETRYABLE_STATUS
+        snippet = (response.text or "").strip().replace("\n", " ")[:180]
+        detail = (
+            f"{response.reason or 'request failed'}"
+            + (f" | {snippet}" if snippet else "")
+        )
+        raise SecAccessError(
+            detail,
+            stage=stage,
+            url=url,
+            status_code=int(response.status_code),
+            retryable=retryable,
+        )
+
+    return response
+
+
+def _parse_company_tickers_json(payload: dict) -> dict:
     out = {}
-    for item in payload.values():
+    for item in (payload or {}).values():
         ticker = normalize_sec_ticker(item.get("ticker"))
         cik = item.get("cik_str")
         if not ticker or cik is None:
@@ -81,23 +181,261 @@ def fetch_sec_ticker_map(
             "cik": int(cik),
             "title": str(item.get("title") or ""),
         }
+    if not out:
+        raise ValueError("SEC company_tickers.json returned no ticker/CIK rows.")
     return out
+
+
+def _parse_ticker_txt(text: str) -> dict:
+    out = {}
+    for raw in str(text or "").splitlines():
+        if "\t" not in raw:
+            continue
+        ticker_raw, cik_raw = raw.split("\t", 1)
+        ticker = normalize_sec_ticker(ticker_raw)
+        try:
+            cik = int(str(cik_raw).strip())
+        except Exception:
+            continue
+        if ticker:
+            out[ticker] = {
+                "ticker": ticker,
+                "cik": cik,
+                "title": "",
+            }
+    if not out:
+        raise ValueError("SEC ticker.txt returned no ticker/CIK rows.")
+    return out
+
+
+def _parse_company_tickers_exchange(payload: dict) -> dict:
+    fields = list((payload or {}).get("fields") or [])
+    data = list((payload or {}).get("data") or [])
+    if not fields or not data:
+        raise ValueError(
+            "SEC company_tickers_exchange.json returned no association rows."
+        )
+
+    try:
+        cik_i = fields.index("cik")
+        name_i = fields.index("name")
+        ticker_i = fields.index("ticker")
+    except ValueError as exc:
+        raise ValueError(
+            "SEC company_tickers_exchange.json schema is missing "
+            "cik/name/ticker fields."
+        ) from exc
+
+    out = {}
+    for row in data:
+        try:
+            ticker = normalize_sec_ticker(row[ticker_i])
+            cik = int(row[cik_i])
+            title = str(row[name_i] or "")
+        except Exception:
+            continue
+        if ticker:
+            out[ticker] = {
+                "ticker": ticker,
+                "cik": cik,
+                "title": title,
+            }
+
+    if not out:
+        raise ValueError(
+            "SEC company_tickers_exchange.json produced no usable rows."
+        )
+    return out
+
+
+def fetch_sec_ticker_map_json(
+    user_agent: str | None = None,
+    timeout: float = 12.0,
+) -> dict:
+    response = _sec_get(
+        SEC_TICKER_JSON_URL,
+        stage="SEC IDENTITY company_tickers.json",
+        user_agent=user_agent,
+        timeout=timeout,
+        accept="application/json,*/*;q=0.8",
+    )
+    try:
+        return _parse_company_tickers_json(response.json())
+    except Exception as exc:
+        raise SecAccessError(
+            f"Invalid JSON/schema: {exc}",
+            stage="SEC IDENTITY company_tickers.json",
+            url=SEC_TICKER_JSON_URL,
+        ) from exc
+
+
+def fetch_sec_ticker_map_text(
+    user_agent: str | None = None,
+    timeout: float = 12.0,
+) -> dict:
+    response = _sec_get(
+        SEC_TICKER_TEXT_URL,
+        stage="SEC IDENTITY ticker.txt",
+        user_agent=user_agent,
+        timeout=timeout,
+        accept="text/plain,*/*;q=0.8",
+    )
+    try:
+        return _parse_ticker_txt(response.text)
+    except Exception as exc:
+        raise SecAccessError(
+            f"Invalid ticker.txt payload: {exc}",
+            stage="SEC IDENTITY ticker.txt",
+            url=SEC_TICKER_TEXT_URL,
+        ) from exc
+
+
+def fetch_sec_ticker_map_exchange(
+    user_agent: str | None = None,
+    timeout: float = 12.0,
+) -> dict:
+    response = _sec_get(
+        SEC_TICKER_EXCHANGE_URL,
+        stage="SEC IDENTITY company_tickers_exchange.json",
+        user_agent=user_agent,
+        timeout=timeout,
+        accept="application/json,*/*;q=0.8",
+    )
+    try:
+        return _parse_company_tickers_exchange(response.json())
+    except Exception as exc:
+        raise SecAccessError(
+            f"Invalid JSON/schema: {exc}",
+            stage="SEC IDENTITY company_tickers_exchange.json",
+            url=SEC_TICKER_EXCHANGE_URL,
+        ) from exc
+
+
+def fetch_sec_ticker_map(
+    user_agent: str | None = None,
+    timeout: float = 12.0,
+) -> dict:
+    """Compatibility helper: fetch an official SEC ticker map with fallbacks."""
+    errors = []
+    for source_name, loader in (
+        ("company_tickers.json", fetch_sec_ticker_map_json),
+        ("ticker.txt", fetch_sec_ticker_map_text),
+        ("company_tickers_exchange.json", fetch_sec_ticker_map_exchange),
+    ):
+        try:
+            return loader(user_agent=user_agent, timeout=timeout)
+        except SecAccessError as exc:
+            errors.append(f"{source_name} [{exc.compact()}]")
+
+    raise SecAccessError(
+        "All official SEC ticker/CIK association sources failed: "
+        + " | ".join(errors),
+        stage="SEC IDENTITY ALL SOURCES",
+        url=";".join(
+            [
+                SEC_TICKER_JSON_URL,
+                SEC_TICKER_TEXT_URL,
+                SEC_TICKER_EXCHANGE_URL,
+            ]
+        ),
+    )
+
+
+def resolve_sec_identity(
+    ticker: str,
+    user_agent: str | None = None,
+    timeout: float = 12.0,
+) -> dict:
+    """Resolve ticker->CIK across multiple official SEC association files.
+
+    Returns the successful source and diagnostics. A failure of one endpoint
+    never silently becomes "ticker not found".
+    """
+    ticker = normalize_sec_ticker(ticker)
+    if not ticker:
+        raise SecIdentityNotFound("Ticker is blank.")
+
+    diagnostics = []
+
+    for source_name, loader in (
+        ("SEC company_tickers.json", fetch_sec_ticker_map_json),
+        ("SEC ticker.txt", fetch_sec_ticker_map_text),
+        ("SEC company_tickers_exchange.json", fetch_sec_ticker_map_exchange),
+    ):
+        try:
+            mapping = loader(user_agent=user_agent, timeout=timeout)
+        except SecAccessError as exc:
+            diagnostics.append(exc.compact())
+            continue
+
+        identity = mapping.get(ticker)
+        if identity is not None:
+            out = dict(identity)
+            out.update(
+                {
+                    "identity_source": source_name,
+                    "identity_access_status": "PASS",
+                    "identity_diagnostics": " | ".join(diagnostics),
+                }
+            )
+            return out
+
+        diagnostics.append(f"{source_name}: accessible, ticker not present")
+
+    access_failures = [
+        item for item in diagnostics
+        if "HTTP " in item or "NETWORK/FORMAT" in item
+    ]
+    if access_failures and len(access_failures) == len(diagnostics):
+        raise SecAccessError(
+            "Unable to resolve ticker because every official SEC identity "
+            "source failed access/format checks: " + " | ".join(diagnostics),
+            stage="SEC IDENTITY ALL SOURCES",
+            url=";".join(
+                [
+                    SEC_TICKER_JSON_URL,
+                    SEC_TICKER_TEXT_URL,
+                    SEC_TICKER_EXCHANGE_URL,
+                ]
+            ),
+        )
+
+    raise SecIdentityNotFound(
+        f"{ticker} was not found in the official SEC ticker/CIK association "
+        f"sources. Diagnostics: {' | '.join(diagnostics)}"
+    )
 
 
 def fetch_sec_companyfacts(
     cik: int,
     user_agent: str | None = None,
-    timeout: float = 20.0,
+    timeout: float = 15.0,
 ) -> dict:
     """Fetch one issuer's official SEC CompanyFacts JSON."""
-    response = requests.get(
-        SEC_COMPANYFACTS_URL.format(cik=int(cik)),
-        headers=_headers(user_agent),
+    url = SEC_COMPANYFACTS_URL.format(cik=int(cik))
+    response = _sec_get(
+        url,
+        stage="SEC COMPANYFACTS",
+        user_agent=user_agent,
         timeout=timeout,
+        accept="application/json,*/*;q=0.8",
     )
-    response.raise_for_status()
-    return response.json()
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise SecAccessError(
+            f"Invalid CompanyFacts JSON: {exc}",
+            stage="SEC COMPANYFACTS",
+            url=url,
+        ) from exc
 
+    if not isinstance(payload, dict) or not payload.get("facts"):
+        raise SecAccessError(
+            "CompanyFacts response did not contain a usable 'facts' object.",
+            stage="SEC COMPANYFACTS",
+            url=url,
+        )
+    return payload
 
 def _to_date(value) -> date | None:
     if not value:
@@ -492,7 +830,7 @@ def build_fundamental_snapshot(
 ) -> dict:
     """Build explainable revenue/earnings diagnostics from SEC CompanyFacts.
 
-    V1.2.2.1 is deliberately SHADOW MODE. This function does not know about or
+    V1.2.2.1a remains deliberately SHADOW MODE. This function does not know about or
     modify scanner eligibility, buckets, entry quality, or trade decisions.
     """
     ticker = normalize_sec_ticker(ticker)
@@ -685,6 +1023,12 @@ def build_fundamental_snapshot(
         "company_name": company_name or companyfacts.get("entityName") or "",
         "source": "SEC EDGAR CompanyFacts",
         "fundamental_version": FUNDAMENTALS_VERSION,
+        "sec_access_status": "PASS",
+        "identity_access_status": "PASS",
+        "companyfacts_access_status": "PASS",
+        "identity_source": None,
+        "identity_diagnostics": "",
+        "access_detail": "",
         "fundamental_score": round(float(score), 1) if np.isfinite(score) else np.nan,
         "fundamental_grade": _grade(score),
         "fundamental_confidence": confidence,
@@ -728,6 +1072,11 @@ def unavailable_snapshot(
     *,
     cik: int | None = None,
     company_name: str | None = None,
+    sec_access_status: str = "FAILED",
+    identity_access_status: str = "UNKNOWN",
+    companyfacts_access_status: str = "UNKNOWN",
+    identity_source: str | None = None,
+    identity_diagnostics: str = "",
 ) -> dict:
     """Explicit fail-safe object. Never manufactures a fundamental score."""
     return {
@@ -736,6 +1085,12 @@ def unavailable_snapshot(
         "company_name": company_name or "",
         "source": "SEC EDGAR CompanyFacts",
         "fundamental_version": FUNDAMENTALS_VERSION,
+        "sec_access_status": sec_access_status,
+        "identity_access_status": identity_access_status,
+        "companyfacts_access_status": companyfacts_access_status,
+        "identity_source": identity_source,
+        "identity_diagnostics": identity_diagnostics,
+        "access_detail": str(reason),
         "fundamental_score": np.nan,
         "fundamental_grade": "N/A",
         "fundamental_confidence": "UNKNOWN",
