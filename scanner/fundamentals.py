@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Iterable
+import re
 
 import numpy as np
 import pandas as pd
@@ -10,7 +11,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 
-FUNDAMENTALS_VERSION = "V1.2.2.1b"
+FUNDAMENTALS_VERSION = "V1.2.2.1b1"
 
 SEC_TICKER_JSON_URL = "https://www.sec.gov/files/company_tickers.json"
 SEC_TICKER_TEXT_URL = "https://www.sec.gov/include/ticker.txt"
@@ -35,12 +36,15 @@ SEC_IDENTITY_MIRROR_URL = (
 )
 SEC_IDENTITY_MIRROR_LABEL = "SEC-derived pinned GitHub identity mirror"
 
-# SEC asks automated clients to identify themselves. A user-supplied
-# SEC_USER_AGENT Streamlit secret is preferred. The default still identifies
-# the project and provides a stable contact location without inventing an email.
-DEFAULT_SEC_USER_AGENT = (
-    "TradeWithEdge AlpacaScanner/1.2.2.1b "
-    "(contact: https://github.com/tradewithedge/alpaca-scanner)"
+# SEC's published programmatic-access guidance asks automated clients to
+# declare a User-Agent containing organization/application identity plus a
+# contact email. We intentionally do NOT fabricate a user's contact email.
+DEFAULT_SEC_USER_AGENT = ""
+
+SEC_APPLICATION_NAME = "TradeWithEdge AlpacaScanner/1.2.2.1b1"
+SEC_EMAIL_RE = re.compile(
+    r"([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})",
+    re.IGNORECASE,
 )
 
 SEC_RETRYABLE_STATUS = (429, 500, 502, 503, 504)
@@ -69,6 +73,96 @@ NET_INCOME_CONCEPTS = [
     ("ifrs-full", "ProfitLoss"),
 ]
 
+
+
+class SecFairAccessConfigError(RuntimeError):
+    """Raised before an official SEC request when declaration is incomplete."""
+    pass
+
+
+def extract_contact_email(value: str | None) -> str | None:
+    match = SEC_EMAIL_RE.search(str(value or "").strip())
+    return match.group(1) if match else None
+
+
+def build_sec_declared_user_agent(
+    *,
+    contact_email: str | None = None,
+    explicit_user_agent: str | None = None,
+    organization: str | None = None,
+) -> dict:
+    """Build/validate an SEC-declared User-Agent without inventing identity."""
+    explicit = str(explicit_user_agent or "").strip()
+    explicit_email = extract_contact_email(explicit)
+    if explicit and explicit_email:
+        return {
+            "ready": True,
+            "user_agent": explicit,
+            "contact_email": explicit_email,
+            "source": "SEC_USER_AGENT",
+            "reason": "",
+        }
+
+    email = extract_contact_email(contact_email)
+    if email:
+        org = str(organization or "TradeWithEdge").strip() or "TradeWithEdge"
+        return {
+            "ready": True,
+            "user_agent": f"{org} AlpacaScanner/1.2.2.1b1 {email}",
+            "contact_email": email,
+            "source": "SEC_CONTACT_EMAIL",
+            "reason": "",
+        }
+
+    reason = (
+        "A declared SEC contact email is required before CompanyFacts is "
+        "requested. Configure SEC_CONTACT_EMAIL, or provide SEC_USER_AGENT "
+        "containing organization/application identity and a contact email."
+    )
+    if explicit and not explicit_email:
+        reason = (
+            "SEC_USER_AGENT exists but does not contain a contact email. "
+            + reason
+        )
+
+    return {
+        "ready": False,
+        "user_agent": "",
+        "contact_email": None,
+        "source": "MISSING",
+        "reason": reason,
+    }
+
+
+def classify_sec_transport_failure(
+    *,
+    stage: str,
+    status_code: int | None,
+    declaration_ready: bool,
+) -> str:
+    """Classify connectivity without making a financial-data conclusion."""
+    stage_u = str(stage or "").upper()
+
+    if not declaration_ready:
+        return "FAIR ACCESS CONFIG REQUIRED"
+    if status_code == 403:
+        if "COMPANYFACTS" in stage_u:
+            return "DECLARED REQUEST BLOCKED — DEPLOYMENT/IP PATH LIKELY"
+        return "DECLARED REQUEST FORBIDDEN"
+    if status_code == 429:
+        return "SEC RATE LIMITED"
+    if status_code in {500, 502, 503, 504}:
+        return "SEC TRANSIENT SERVER ERROR"
+    if status_code is None:
+        return "NETWORK/TRANSPORT FAILURE"
+    return f"HTTP {status_code} ACCESS FAILURE"
+
+
+def sanitize_sec_error_text(text: str | None, limit: int = 180) -> str:
+    """Strip raw HTML from gateway errors before showing them."""
+    value = re.sub(r"<[^>]+>", " ", str(text or ""))
+    value = re.sub(r"\s+", " ", value).strip()
+    return value[:limit] if value else ""
 
 class SecAccessError(RuntimeError):
     """Structured SEC transport/access failure used by the dashboard."""
@@ -107,7 +201,18 @@ def normalize_sec_ticker(ticker: str) -> str:
 
 
 def _headers(user_agent: str | None, *, accept: str) -> dict:
-    ua = str(user_agent or DEFAULT_SEC_USER_AGENT).strip()
+    ua = str(user_agent or "").strip()
+    if not ua:
+        raise SecFairAccessConfigError(
+            "Official SEC request blocked locally: declared User-Agent "
+            "with contact email is not configured."
+        )
+    if not extract_contact_email(ua):
+        raise SecFairAccessConfigError(
+            "Official SEC request blocked locally: declared User-Agent "
+            "does not contain a contact email."
+        )
+
     return {
         "User-Agent": ua,
         "Accept-Encoding": "gzip, deflate",
@@ -152,7 +257,17 @@ def _sec_get(
     timeout: float = 12.0,
     accept: str = "application/json,text/plain;q=0.9,*/*;q=0.8",
 ) -> requests.Response:
-    session = _build_session(user_agent, accept=accept)
+    try:
+        session = _build_session(user_agent, accept=accept)
+    except SecFairAccessConfigError as exc:
+        raise SecAccessError(
+            str(exc),
+            stage=f"{stage} FAIR ACCESS CONFIG",
+            url=url,
+            status_code=None,
+            retryable=False,
+        ) from exc
+
     try:
         response = session.get(
             url,
@@ -171,7 +286,7 @@ def _sec_get(
 
     if response.status_code >= 400:
         retryable = response.status_code in SEC_RETRYABLE_STATUS
-        snippet = (response.text or "").strip().replace("\n", " ")[:180]
+        snippet = sanitize_sec_error_text(response.text, limit=180)
         detail = (
             f"{response.reason or 'request failed'}"
             + (f" | {snippet}" if snippet else "")
@@ -1224,6 +1339,10 @@ def build_fundamental_snapshot(
         "source": "SEC EDGAR CompanyFacts",
         "fundamental_version": FUNDAMENTALS_VERSION,
         "sec_access_status": "PASS",
+        "fair_access_status": "PASS",
+        "fair_access_source": None,
+        "fair_access_contact": None,
+        "companyfacts_transport_diagnosis": "PASS",
         "identity_access_status": "PASS",
         "companyfacts_access_status": "PASS",
         "identity_source": None,
@@ -1274,6 +1393,10 @@ def unavailable_snapshot(
     cik: int | None = None,
     company_name: str | None = None,
     sec_access_status: str = "FAILED",
+    fair_access_status: str = "UNKNOWN",
+    fair_access_source: str | None = None,
+    fair_access_contact: str | None = None,
+    companyfacts_transport_diagnosis: str = "UNKNOWN",
     identity_access_status: str = "UNKNOWN",
     companyfacts_access_status: str = "UNKNOWN",
     identity_source: str | None = None,
@@ -1288,6 +1411,10 @@ def unavailable_snapshot(
         "source": "SEC EDGAR CompanyFacts",
         "fundamental_version": FUNDAMENTALS_VERSION,
         "sec_access_status": sec_access_status,
+        "fair_access_status": fair_access_status,
+        "fair_access_source": fair_access_source,
+        "fair_access_contact": fair_access_contact,
+        "companyfacts_transport_diagnosis": companyfacts_transport_diagnosis,
         "identity_access_status": identity_access_status,
         "companyfacts_access_status": companyfacts_access_status,
         "identity_source": identity_source,
