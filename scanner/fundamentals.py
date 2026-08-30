@@ -10,18 +10,36 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 
-FUNDAMENTALS_VERSION = "V1.2.2.1a"
+FUNDAMENTALS_VERSION = "V1.2.2.1b"
 
 SEC_TICKER_JSON_URL = "https://www.sec.gov/files/company_tickers.json"
 SEC_TICKER_TEXT_URL = "https://www.sec.gov/include/ticker.txt"
 SEC_TICKER_EXCHANGE_URL = "https://www.sec.gov/files/company_tickers_exchange.json"
 SEC_COMPANYFACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
 
+# Streamlit Cloud has now been observed returning HTTP 403 for multiple
+# www.sec.gov ticker/CIK association endpoints. To keep the financial source
+# authoritative while bypassing that transport bottleneck, V1.2.2.1b permits
+# one VERSION-PINNED SEC-derived identity mirror for ticker -> CIK resolution.
+#
+# IMPORTANT:
+# - This mirror is used ONLY for identity metadata (ticker -> CIK).
+# - Revenue / earnings / filing values are NEVER read from this mirror.
+# - Financial facts still come only from official data.sec.gov CompanyFacts.
+# - The URL is commit-pinned so content cannot silently change under the app.
+SEC_IDENTITY_MIRROR_URL = (
+    "https://raw.githubusercontent.com/"
+    "louiscypher1993/stock-catalyst-historian/"
+    "2b43f3d5136de5b2ee77dd5802855e2d525a94a6/"
+    "src/scripts/cik_ticker_map.json"
+)
+SEC_IDENTITY_MIRROR_LABEL = "SEC-derived pinned GitHub identity mirror"
+
 # SEC asks automated clients to identify themselves. A user-supplied
 # SEC_USER_AGENT Streamlit secret is preferred. The default still identifies
 # the project and provides a stable contact location without inventing an email.
 DEFAULT_SEC_USER_AGENT = (
-    "TradeWithEdge AlpacaScanner/1.2.2.1a "
+    "TradeWithEdge AlpacaScanner/1.2.2.1b "
     "(contact: https://github.com/tradewithedge/alpaca-scanner)"
 )
 
@@ -311,6 +329,96 @@ def fetch_sec_ticker_map_exchange(
         ) from exc
 
 
+
+def _parse_sec_identity_mirror(payload: dict) -> dict:
+    """Parse the commit-pinned CIK->ticker mirror into ticker->identity.
+
+    The mirror contains identity metadata only. It is never accepted as a
+    source of revenue, earnings, or any other financial fact.
+    """
+    out = {}
+    if not isinstance(payload, dict):
+        raise ValueError("SEC-derived identity mirror did not return an object.")
+
+    for cik_raw, ticker_raw in payload.items():
+        ticker = normalize_sec_ticker(ticker_raw)
+        try:
+            cik = int(str(cik_raw).strip())
+        except Exception:
+            continue
+        if not ticker or cik <= 0:
+            continue
+        out[ticker] = {
+            "ticker": ticker,
+            "cik": cik,
+            "title": "",
+        }
+
+    if not out:
+        raise ValueError("SEC-derived identity mirror produced no usable rows.")
+    return out
+
+
+def fetch_sec_identity_mirror(
+    timeout: float = 15.0,
+) -> dict:
+    """Fetch the version-pinned SEC-derived ticker/CIK transport mirror."""
+    headers = {
+        "User-Agent": "TradeWithEdge-AlpacaScanner/1.2.2.1b",
+        "Accept": "application/json,text/plain,*/*",
+        "Accept-Encoding": "gzip, deflate",
+    }
+    try:
+        response = requests.get(
+            SEC_IDENTITY_MIRROR_URL,
+            headers=headers,
+            timeout=(5.0, float(timeout)),
+        )
+    except requests.RequestException as exc:
+        raise SecAccessError(
+            str(exc),
+            stage="SEC IDENTITY MIRROR",
+            url=SEC_IDENTITY_MIRROR_URL,
+            retryable=True,
+        ) from exc
+
+    if response.status_code >= 400:
+        raise SecAccessError(
+            response.reason or "mirror request failed",
+            stage="SEC IDENTITY MIRROR",
+            url=SEC_IDENTITY_MIRROR_URL,
+            status_code=int(response.status_code),
+            retryable=response.status_code in SEC_RETRYABLE_STATUS,
+        )
+
+    try:
+        return _parse_sec_identity_mirror(response.json())
+    except Exception as exc:
+        raise SecAccessError(
+            f"Invalid identity-mirror payload: {exc}",
+            stage="SEC IDENTITY MIRROR",
+            url=SEC_IDENTITY_MIRROR_URL,
+        ) from exc
+
+
+def _identity_result(
+    identity: dict,
+    *,
+    source_name: str,
+    diagnostics: list[str],
+    authority: str,
+) -> dict:
+    out = dict(identity)
+    out.update(
+        {
+            "identity_source": source_name,
+            "identity_authority": authority,
+            "identity_access_status": "PASS",
+            "identity_diagnostics": " | ".join(diagnostics),
+        }
+    )
+    return out
+
 def fetch_sec_ticker_map(
     user_agent: str | None = None,
     timeout: float = 12.0,
@@ -346,19 +454,76 @@ def resolve_sec_identity(
     user_agent: str | None = None,
     timeout: float = 12.0,
 ) -> dict:
-    """Resolve ticker->CIK across multiple official SEC association files.
+    """Resolve ticker -> CIK with official-first, transport-bypass fallback.
 
-    Returns the successful source and diagnostics. A failure of one endpoint
-    never silently becomes "ticker not found".
+    Normal path:
+      official SEC association files -> official CompanyFacts.
+
+    Streamlit Cloud transport-bypass path:
+      version-pinned SEC-derived identity mirror -> official CompanyFacts.
+
+    A 403 from www.sec.gov is treated as evidence that the host/path is
+    blocked from the deployment environment. We do not waste additional
+    requests probing every www.sec.gov identity file before trying the mirror.
     """
     ticker = normalize_sec_ticker(ticker)
     if not ticker:
         raise SecIdentityNotFound("Ticker is blank.")
 
-    diagnostics = []
+    diagnostics: list[str] = []
 
+    # 1) Primary official SEC identity endpoint.
+    try:
+        mapping = fetch_sec_ticker_map_json(
+            user_agent=user_agent,
+            timeout=timeout,
+        )
+        identity = mapping.get(ticker)
+        if identity is not None:
+            return _identity_result(
+                identity,
+                source_name="SEC company_tickers.json",
+                diagnostics=diagnostics,
+                authority="OFFICIAL SEC",
+            )
+        diagnostics.append(
+            "SEC company_tickers.json: accessible, ticker not present"
+        )
+    except SecAccessError as exc:
+        diagnostics.append(exc.compact())
+
+        # We have live evidence that Streamlit Cloud can receive a host-level
+        # 403 from www.sec.gov. In that case, immediately use the transport
+        # mirror instead of repeating two more requests to the same blocked
+        # host.
+        if exc.status_code == 403:
+            try:
+                mirror = fetch_sec_identity_mirror(timeout=timeout)
+                identity = mirror.get(ticker)
+                if identity is not None:
+                    return _identity_result(
+                        identity,
+                        source_name=SEC_IDENTITY_MIRROR_LABEL,
+                        diagnostics=diagnostics,
+                        authority="SEC-DERIVED MIRROR / FINANCIALS STILL OFFICIAL SEC",
+                    )
+                diagnostics.append(
+                    f"{SEC_IDENTITY_MIRROR_LABEL}: accessible, ticker not present"
+                )
+            except SecAccessError as mirror_exc:
+                diagnostics.append(mirror_exc.compact())
+
+            raise SecAccessError(
+                "www.sec.gov identity access returned HTTP 403 and the "
+                "version-pinned SEC-derived mirror did not resolve the ticker. "
+                + " | ".join(diagnostics),
+                stage="SEC IDENTITY TRANSPORT BYPASS",
+                url=SEC_IDENTITY_MIRROR_URL,
+            )
+
+    # 2) If the primary did not show host-level blocking, retain the other
+    # official SEC association files before mirror fallback.
     for source_name, loader in (
-        ("SEC company_tickers.json", fetch_sec_ticker_map_json),
         ("SEC ticker.txt", fetch_sec_ticker_map_text),
         ("SEC company_tickers_exchange.json", fetch_sec_ticker_map_exchange),
     ):
@@ -370,41 +535,55 @@ def resolve_sec_identity(
 
         identity = mapping.get(ticker)
         if identity is not None:
-            out = dict(identity)
-            out.update(
-                {
-                    "identity_source": source_name,
-                    "identity_access_status": "PASS",
-                    "identity_diagnostics": " | ".join(diagnostics),
-                }
+            return _identity_result(
+                identity,
+                source_name=source_name,
+                diagnostics=diagnostics,
+                authority="OFFICIAL SEC",
             )
-            return out
 
         diagnostics.append(f"{source_name}: accessible, ticker not present")
 
-    access_failures = [
-        item for item in diagnostics
-        if "HTTP " in item or "NETWORK/FORMAT" in item
-    ]
-    if access_failures and len(access_failures) == len(diagnostics):
-        raise SecAccessError(
-            "Unable to resolve ticker because every official SEC identity "
-            "source failed access/format checks: " + " | ".join(diagnostics),
-            stage="SEC IDENTITY ALL SOURCES",
-            url=";".join(
-                [
-                    SEC_TICKER_JSON_URL,
-                    SEC_TICKER_TEXT_URL,
-                    SEC_TICKER_EXCHANGE_URL,
-                ]
-            ),
+    # 3) Transport-only mirror as final identity fallback.
+    try:
+        mirror = fetch_sec_identity_mirror(timeout=timeout)
+        identity = mirror.get(ticker)
+        if identity is not None:
+            return _identity_result(
+                identity,
+                source_name=SEC_IDENTITY_MIRROR_LABEL,
+                diagnostics=diagnostics,
+                authority="SEC-DERIVED MIRROR / FINANCIALS STILL OFFICIAL SEC",
+            )
+        diagnostics.append(
+            f"{SEC_IDENTITY_MIRROR_LABEL}: accessible, ticker not present"
+        )
+    except SecAccessError as exc:
+        diagnostics.append(exc.compact())
+
+    reachable_not_found = any(
+        "accessible, ticker not present" in item for item in diagnostics
+    )
+    if reachable_not_found:
+        raise SecIdentityNotFound(
+            f"{ticker} was not found in the available SEC identity association "
+            f"sources. Diagnostics: {' | '.join(diagnostics)}"
         )
 
-    raise SecIdentityNotFound(
-        f"{ticker} was not found in the official SEC ticker/CIK association "
-        f"sources. Diagnostics: {' | '.join(diagnostics)}"
+    raise SecAccessError(
+        "Unable to resolve ticker through official SEC identity endpoints or "
+        "the version-pinned SEC-derived transport mirror. "
+        + " | ".join(diagnostics),
+        stage="SEC IDENTITY ALL ROUTES",
+        url=";".join(
+            [
+                SEC_TICKER_JSON_URL,
+                SEC_TICKER_TEXT_URL,
+                SEC_TICKER_EXCHANGE_URL,
+                SEC_IDENTITY_MIRROR_URL,
+            ]
+        ),
     )
-
 
 def fetch_sec_companyfacts(
     cik: int,
@@ -435,6 +614,27 @@ def fetch_sec_companyfacts(
             stage="SEC COMPANYFACTS",
             url=url,
         )
+
+    # Guard against a bad/stale mirror identity. The requested CIK and the
+    # official CompanyFacts CIK must agree whenever the API exposes it.
+    payload_cik = payload.get("cik")
+    if payload_cik is not None:
+        try:
+            payload_cik = int(payload_cik)
+        except Exception:
+            raise SecAccessError(
+                "CompanyFacts returned a non-numeric CIK.",
+                stage="SEC COMPANYFACTS IDENTITY VALIDATION",
+                url=url,
+            )
+        if payload_cik != int(cik):
+            raise SecAccessError(
+                f"CompanyFacts CIK mismatch: requested {int(cik)}, "
+                f"received {payload_cik}.",
+                stage="SEC COMPANYFACTS IDENTITY VALIDATION",
+                url=url,
+            )
+
     return payload
 
 def _to_date(value) -> date | None:
@@ -1027,6 +1227,7 @@ def build_fundamental_snapshot(
         "identity_access_status": "PASS",
         "companyfacts_access_status": "PASS",
         "identity_source": None,
+        "identity_authority": None,
         "identity_diagnostics": "",
         "access_detail": "",
         "fundamental_score": round(float(score), 1) if np.isfinite(score) else np.nan,
@@ -1076,6 +1277,7 @@ def unavailable_snapshot(
     identity_access_status: str = "UNKNOWN",
     companyfacts_access_status: str = "UNKNOWN",
     identity_source: str | None = None,
+    identity_authority: str | None = None,
     identity_diagnostics: str = "",
 ) -> dict:
     """Explicit fail-safe object. Never manufactures a fundamental score."""
@@ -1089,6 +1291,7 @@ def unavailable_snapshot(
         "identity_access_status": identity_access_status,
         "companyfacts_access_status": companyfacts_access_status,
         "identity_source": identity_source,
+        "identity_authority": identity_authority,
         "identity_diagnostics": identity_diagnostics,
         "access_detail": str(reason),
         "fundamental_score": np.nan,
