@@ -81,7 +81,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.2.1a"
+APP_VERSION = "V1.2.2.1b"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -91,12 +91,13 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Fundamental Growth & Earnings Quality • SEC Access Integrity Hotfix"
+    "• Trade With Edge • Candidate Quality Engine • Fundamental Growth & Earnings Quality • SEC Identity Transport Bypass"
 )
 st.caption(
-    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.2.1a SEC Access "
-    "Integrity Hotfix • Fundamental model remains SHADOW MODE • Frozen "
-    "V1.2.1 Leadership and scanner classifications remain unchanged"
+    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.2.1b SEC Identity "
+    "Transport Bypass • Financial values remain official SEC CompanyFacts "
+    "• Fundamental model remains SHADOW MODE • Frozen V1.2.1 Leadership "
+    "and scanner classifications remain unchanged"
 )
 
 
@@ -220,6 +221,7 @@ def load_fundamental_snapshot(symbol):
             identity_access_status="PASS",
             companyfacts_access_status="FAILED",
             identity_source=identity.get("identity_source"),
+            identity_authority=identity.get("identity_authority"),
             identity_diagnostics=identity.get("identity_diagnostics", ""),
         )
     except Exception as exc:
@@ -232,6 +234,7 @@ def load_fundamental_snapshot(symbol):
             identity_access_status="PASS",
             companyfacts_access_status="FAILED",
             identity_source=identity.get("identity_source"),
+            identity_authority=identity.get("identity_authority"),
             identity_diagnostics=identity.get("identity_diagnostics", ""),
         )
 
@@ -242,6 +245,7 @@ def load_fundamental_snapshot(symbol):
         company_name=identity.get("title"),
     )
     snapshot["identity_source"] = identity.get("identity_source")
+    snapshot["identity_authority"] = identity.get("identity_authority")
     snapshot["identity_access_status"] = "PASS"
     snapshot["companyfacts_access_status"] = "PASS"
     snapshot["sec_access_status"] = "PASS"
@@ -410,12 +414,12 @@ def _fund_pp(value):
 
 
 def render_fundamental_quality(symbol, *, expanded=True, key_prefix="fund"):
-    """Render V1.2.2.1a fundamentals in read-only SHADOW MODE."""
+    """Render V1.2.2.1b fundamentals in read-only SHADOW MODE."""
     with st.spinner(f"Loading official SEC fundamentals for {symbol}..."):
         fund = load_fundamental_snapshot(symbol)
 
     with st.expander(
-        "V1.2.2.1a Fundamental Growth & Earnings Quality — Explainable View",
+        "V1.2.2.1b Fundamental Growth & Earnings Quality — Explainable View",
         expanded=expanded,
     ):
         st.caption(
@@ -464,10 +468,23 @@ def render_fundamental_quality(symbol, *, expanded=True, key_prefix="fund"):
             fund.get("identity_source") or "—",
         )
 
+        identity_authority = fund.get("identity_authority")
+        if identity_authority:
+            if "MIRROR" in str(identity_authority).upper():
+                st.info(
+                    "Ticker → CIK was resolved through a version-pinned "
+                    "SEC-derived transport mirror because the deployment path "
+                    "to www.sec.gov is blocked. Revenue, earnings, filing dates "
+                    "and all financial facts are still requested ONLY from "
+                    "official data.sec.gov CompanyFacts."
+                )
+            else:
+                st.caption(f"Identity authority: {identity_authority}")
+
         if fund.get("sec_access_status") != "PASS":
             st.error(
-                "SEC access did not complete. This is a transport/identity "
-                "failure, NOT evidence that the company lacks fundamentals. "
+                "SEC access did not complete. This is an access/transport failure, "
+                "NOT evidence that the company lacks fundamentals. "
                 + str(fund.get("access_detail") or "")
             )
         elif fund.get("identity_diagnostics"):
@@ -2010,7 +2027,7 @@ if not lead_valid.empty:
 
 st.markdown("### 3B) Fundamental Quality — Revenue & Earnings")
 st.info(
-    "V1.2.2.1a SHADOW MODE: fundamentals are loaded on demand for the selected "
+    "V1.2.2.1b SHADOW MODE: fundamentals are loaded on demand for the selected "
     "candidate or Ticker Inspector from official SEC EDGAR CompanyFacts. "
     "This first validation build does not batch-fetch fundamentals for the "
     "entire universe and does not alter scanner eligibility or ranking."
