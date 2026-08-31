@@ -8,12 +8,13 @@ import pandas as pd
 from .composite_quality import build_shadow_composite_table
 
 
-ROBUSTNESS_VERSION = "V1.2.3b"
+ROBUSTNESS_VERSION = "V1.2.3b1"
 
 WEIGHT_GRID = (0.05, 0.10, 0.15, 0.20, 0.25, 0.30)
 RANK_GRID = (0.10, 0.15, 0.20, 0.25, 0.30)
 CENTER_WEIGHTS = (0.15, 0.20, 0.25)
 GUARDRAIL_CAPS = (4.0, 6.0, 8.0)
+ANCHOR_WEIGHTS = (0.10, 0.20, 0.30)
 
 
 def _finite(value) -> bool:
@@ -55,11 +56,22 @@ def _top_set(df: pd.DataFrame, score_col: str, top_n: int) -> set[str]:
     return set(df.nlargest(top_n, score_col)["symbol"])
 
 
-def build_composite_robustness_table(batch_table: pd.DataFrame) -> pd.DataFrame:
-    """Build V1.2.3b robustness diagnostics from accepted V1.2.3a output.
+def _accepted_anchor_columns(weight: float) -> tuple[str, str]:
+    tag = _weight_tag(weight)
+    return f"shadow_{tag}", f"{tag}_rank"
 
-    Nothing in this function changes official scanner scores or classifications.
-    It adds interpolation weights and simulated F20 impact caps only.
+
+def build_composite_robustness_table(batch_table: pd.DataFrame) -> pd.DataFrame:
+    """V1.2.3b1 full-precision robustness diagnostics.
+
+    Integrity rules
+    ---------------
+    1. F10/F20/F30 are immutable V1.2.3a anchors:
+       displayed score and rank are reused directly from the accepted layer.
+    2. New interpolation scenarios F05/F15/F25 are calculated from the
+       unrounded internal No-Fund value and ranked on the unrounded score.
+    3. Guardrail simulations use exact F20 incremental Fundamental impact.
+    4. REVIEW/FAIL/unavailable Fundamental Quality is never imputed.
     """
     base = build_shadow_composite_table(batch_table)
     if base is None or base.empty:
@@ -67,8 +79,12 @@ def build_composite_robustness_table(batch_table: pd.DataFrame) -> pd.DataFrame:
 
     out = base.copy(deep=True)
 
-    no_fund = pd.to_numeric(
-        out["technical_leadership_reference"],
+    cq = pd.to_numeric(
+        out["official_candidate_quality"],
+        errors="coerce",
+    )
+    leadership = pd.to_numeric(
+        out["leadership_score"],
         errors="coerce",
     )
     fundamental = pd.to_numeric(
@@ -76,55 +92,104 @@ def build_composite_robustness_table(batch_table: pd.DataFrame) -> pd.DataFrame:
         errors="coerce",
     )
 
-    # Same rankable subset used by the accepted V1.2.3a full composite.
     rankable = pd.to_numeric(
         out["shadow_f20"],
         errors="coerce",
     ).notna()
 
-    # Continuous weight family preserving the frozen 70:30 CQ:Leadership mix.
+    # Full-precision No-Fund internal value.
+    out["no_fund_exact"] = np.nan
+    out.loc[rankable, "no_fund_exact"] = (
+        0.70 * cq.loc[rankable]
+        + 0.30 * leadership.loc[rankable]
+    )
+
+    # Accepted displayed No-Fund remains untouched for V1.2.3a attribution.
+    # Build full-precision scores for every weight, but only NEW interpolation
+    # weights use those exact scores for their ranking.
     for weight in WEIGHT_GRID:
         tag = _weight_tag(weight)
-        score_col = f"score_{tag}"
-
-        out[score_col] = np.nan
-        out.loc[rankable, score_col] = (
-            (1.0 - weight) * no_fund.loc[rankable]
-            + weight * fundamental.loc[rankable]
-        ).round(1)
-
+        exact_col = f"score_{tag}_exact"
+        display_col = f"score_{tag}"
         rank_col = f"rank_{tag}"
-        out[rank_col] = np.nan
-        out.loc[rankable, rank_col] = _rank_desc(
-            out.loc[rankable, score_col]
+        impact_exact_col = f"fund_score_impact_{tag}_exact_pts"
+        impact_display_col = f"fund_score_impact_{tag}_pts"
+
+        out[exact_col] = np.nan
+        out.loc[rankable, exact_col] = (
+            (1.0 - weight) * out.loc[rankable, "no_fund_exact"]
+            + weight * fundamental.loc[rankable]
         )
 
-        impact_col = f"fund_score_impact_{tag}_pts"
-        out[impact_col] = (
-            out[score_col] - out["technical_leadership_reference"]
+        out[impact_exact_col] = (
+            out[exact_col] - out["no_fund_exact"]
+        )
+
+        if weight in ANCHOR_WEIGHTS:
+            accepted_score_col, accepted_rank_col = _accepted_anchor_columns(
+                weight
+            )
+
+            # Critical b1 fix: reuse accepted V1.2.3a anchor values exactly.
+            out[display_col] = pd.to_numeric(
+                out[accepted_score_col],
+                errors="coerce",
+            )
+            out[rank_col] = pd.to_numeric(
+                out[accepted_rank_col],
+                errors="coerce",
+            )
+        else:
+            out[display_col] = pd.to_numeric(
+                out[exact_col],
+                errors="coerce",
+            ).round(1)
+
+            out[rank_col] = np.nan
+            out.loc[rankable, rank_col] = _rank_desc(
+                out.loc[rankable, exact_col]
+            )
+
+        out[impact_display_col] = pd.to_numeric(
+            out[impact_exact_col],
+            errors="coerce",
         ).round(1)
 
-    # Integrity: F10 / F20 / F30 must match accepted V1.2.3a values.
-    out["f10_match_v123a"] = np.isclose(
-        pd.to_numeric(out["score_f10"], errors="coerce"),
-        pd.to_numeric(out["shadow_f10"], errors="coerce"),
-        atol=0.11,
-        equal_nan=True,
-    )
-    out["f20_match_v123a"] = np.isclose(
-        pd.to_numeric(out["score_f20"], errors="coerce"),
-        pd.to_numeric(out["shadow_f20"], errors="coerce"),
-        atol=0.11,
-        equal_nan=True,
-    )
-    out["f30_match_v123a"] = np.isclose(
-        pd.to_numeric(out["score_f30"], errors="coerce"),
-        pd.to_numeric(out["shadow_f30"], errors="coerce"),
-        atol=0.11,
-        equal_nan=True,
-    )
+    # Anchor score integrity: exact formulas rounded to display precision must
+    # reproduce the accepted V1.2.3a displayed scores.
+    for weight in ANCHOR_WEIGHTS:
+        tag = _weight_tag(weight)
+        accepted_score_col, accepted_rank_col = _accepted_anchor_columns(weight)
 
-    # Weight sensitivity is evaluated F10→F30, avoiding the trivial near-No-Fund F05.
+        out[f"{tag}_score_match_v123a"] = np.isclose(
+            pd.to_numeric(
+                out[f"score_{tag}_exact"],
+                errors="coerce",
+            ).round(1),
+            pd.to_numeric(
+                out[accepted_score_col],
+                errors="coerce",
+            ),
+            atol=1e-12,
+            equal_nan=True,
+        )
+
+        out[f"{tag}_rank_match_v123a"] = (
+            pd.to_numeric(
+                out[f"rank_{tag}"],
+                errors="coerce",
+            )
+            .fillna(-999999)
+            .eq(
+                pd.to_numeric(
+                    out[accepted_rank_col],
+                    errors="coerce",
+                ).fillna(-999999)
+            )
+        )
+
+    # Weight sensitivity F10→F30.
+    # F10/F20/F30 ranks are frozen anchors; F15/F25 use exact internal ranks.
     rank_cols = [f"rank_{_weight_tag(w)}" for w in RANK_GRID]
     out["rank_best_f10_f30"] = out[rank_cols].min(axis=1, skipna=False)
     out["rank_worst_f10_f30"] = out[rank_cols].max(axis=1, skipna=False)
@@ -136,15 +201,23 @@ def build_composite_robustness_table(batch_table: pd.DataFrame) -> pd.DataFrame:
     for weight in RANK_GRID:
         tag = _weight_tag(weight)
         out[f"top10_{tag}"] = False
-        if top_n:
-            members = _top_set(
-                out.loc[rankable],
-                f"score_{tag}",
-                top_n,
-            )
-            out.loc[rankable, f"top10_{tag}"] = (
-                out.loc[rankable, "symbol"].isin(members)
-            )
+
+        if not top_n:
+            continue
+
+        if weight in ANCHOR_WEIGHTS:
+            score_col = f"score_{tag}"
+        else:
+            score_col = f"score_{tag}_exact"
+
+        members = _top_set(
+            out.loc[rankable],
+            score_col,
+            top_n,
+        )
+        out.loc[rankable, f"top10_{tag}"] = (
+            out.loc[rankable, "symbol"].isin(members)
+        )
 
     out["top10_weight_count"] = out[
         [f"top10_{_weight_tag(w)}" for w in RANK_GRID]
@@ -154,72 +227,100 @@ def build_composite_robustness_table(batch_table: pd.DataFrame) -> pd.DataFrame:
         [f"top10_{_weight_tag(w)}" for w in CENTER_WEIGHTS]
     ].sum(axis=1)
 
-    # Raw accepted F20 Fundamental impact.
-    raw_f20_impact = pd.to_numeric(
-        out["f20_fund_score_impact_pts"],
+    # Full-precision raw F20 incremental Fundamental impact.
+    out["f20_fund_score_impact_exact_pts"] = pd.to_numeric(
+        out["score_f20_exact"] - out["no_fund_exact"],
         errors="coerce",
     )
 
-    # Guardrail simulations: cap the incremental Fundamental contribution only.
+    # Keep accepted V1.2.3a rounded impact visible for continuity.
+    # Guardrail triggers and calculations use the exact value above.
+    raw_f20_impact_exact = pd.to_numeric(
+        out["f20_fund_score_impact_exact_pts"],
+        errors="coerce",
+    )
+
     for cap in GUARDRAIL_CAPS:
         cap_tag = int(cap)
-        clipped = raw_f20_impact.clip(lower=-cap, upper=cap)
+        clipped = raw_f20_impact_exact.clip(lower=-cap, upper=cap)
 
-        score_col = f"guard_f20_cap{cap_tag}"
+        exact_score_col = f"guard_f20_cap{cap_tag}_exact"
+        display_score_col = f"guard_f20_cap{cap_tag}"
         rank_col = f"guard_rank_cap{cap_tag}"
         trigger_col = f"cap{cap_tag}_triggered"
         direction_col = f"cap{cap_tag}_direction"
         rank_delta_col = f"guard_rank_change_cap{cap_tag}_vs_raw"
 
-        out[score_col] = np.nan
-        out.loc[rankable, score_col] = (
-            no_fund.loc[rankable] + clipped.loc[rankable]
+        out[exact_score_col] = np.nan
+        out.loc[rankable, exact_score_col] = (
+            out.loc[rankable, "no_fund_exact"]
+            + clipped.loc[rankable]
+        )
+
+        out[display_score_col] = pd.to_numeric(
+            out[exact_score_col],
+            errors="coerce",
         ).round(1)
 
         out[rank_col] = np.nan
         out.loc[rankable, rank_col] = _rank_desc(
-            out.loc[rankable, score_col]
+            out.loc[rankable, exact_score_col]
         )
 
         out[trigger_col] = False
         out.loc[rankable, trigger_col] = (
-            raw_f20_impact.loc[rankable].abs() > cap
+            raw_f20_impact_exact.loc[rankable].abs() > cap
         )
 
         out[direction_col] = ""
         out.loc[
-            rankable & (raw_f20_impact > cap),
+            rankable & (raw_f20_impact_exact > cap),
             direction_col,
         ] = "UPSIDE CAP"
         out.loc[
-            rankable & (raw_f20_impact < -cap),
+            rankable & (raw_f20_impact_exact < -cap),
             direction_col,
         ] = "DOWNSIDE CAP"
 
         out[rank_delta_col] = np.nan
         out.loc[rankable, rank_delta_col] = (
-            pd.to_numeric(out.loc[rankable, "rank_f20"], errors="coerce")
-            - pd.to_numeric(out.loc[rankable, rank_col], errors="coerce")
+            pd.to_numeric(
+                out.loc[rankable, "f20_rank"],
+                errors="coerce",
+            )
+            - pd.to_numeric(
+                out.loc[rankable, rank_col],
+                errors="coerce",
+            )
         )
 
     return out
 
 
 def _weight_summary(rankable: pd.DataFrame) -> list[dict]:
+    """Report weight-grid metrics against the accepted V1.2.3a No-Fund anchor."""
     rows = []
     top_n = min(10, len(rankable))
 
     for weight in WEIGHT_GRID:
         tag = _weight_tag(weight)
-        score_col = f"score_{tag}"
+
+        # Anchor scenarios use accepted score/rank exactly. Interpolation
+        # scenarios use unrounded exact score/rank.
+        if weight in ANCHOR_WEIGHTS:
+            score_col = f"score_{tag}"
+        else:
+            score_col = f"score_{tag}_exact"
+
         rank_col = f"rank_{tag}"
-        impact_col = f"fund_score_impact_{tag}_pts"
+        impact_col = f"fund_score_impact_{tag}_exact_pts"
 
         corr = _spearman(
             rankable,
             "technical_leadership_reference",
             score_col,
         )
+
         rank_impact = (
             pd.to_numeric(
                 rankable["no_fund_rank"],
@@ -230,6 +331,7 @@ def _weight_summary(rankable: pd.DataFrame) -> list[dict]:
                 errors="coerce",
             )
         )
+
         score_impact = pd.to_numeric(
             rankable[impact_col],
             errors="coerce",
@@ -261,6 +363,11 @@ def _weight_summary(rankable: pd.DataFrame) -> list[dict]:
                     if score_impact.dropna().empty
                     else round(float(score_impact.abs().max()), 1)
                 ),
+                "Mode": (
+                    "V1.2.3a ANCHOR"
+                    if weight in ANCHOR_WEIGHTS
+                    else "FULL-PRECISION INTERPOLATION"
+                ),
             }
         )
 
@@ -273,41 +380,31 @@ def _guardrail_summary(rankable: pd.DataFrame) -> list[dict]:
 
     for cap in GUARDRAIL_CAPS:
         cap_tag = int(cap)
-        score_col = f"guard_f20_cap{cap_tag}"
+        exact_score_col = f"guard_f20_cap{cap_tag}_exact"
         rank_col = f"guard_rank_cap{cap_tag}"
         trigger_col = f"cap{cap_tag}_triggered"
 
         triggered = rankable[trigger_col].astype(bool)
-        corr = _spearman(rankable, "shadow_f20", score_col)
+        corr = _spearman(rankable, "shadow_f20", exact_score_col)
+
         rank_diff = (
-            pd.to_numeric(rankable["rank_f20"], errors="coerce")
+            pd.to_numeric(rankable["f20_rank"], errors="coerce")
             - pd.to_numeric(rankable[rank_col], errors="coerce")
         ).abs()
+
+        exact_impact = pd.to_numeric(
+            rankable["f20_fund_score_impact_exact_pts"],
+            errors="coerce",
+        )
 
         rows.append(
             {
                 "F20 impact cap": f"±{cap_tag} pts",
                 "Triggered": f"{int(triggered.sum())}/{len(rankable)}",
-                "Downside triggers": int(
-                    (
-                        pd.to_numeric(
-                            rankable["f20_fund_score_impact_pts"],
-                            errors="coerce",
-                        )
-                        < -cap
-                    ).sum()
-                ),
-                "Upside triggers": int(
-                    (
-                        pd.to_numeric(
-                            rankable["f20_fund_score_impact_pts"],
-                            errors="coerce",
-                        )
-                        > cap
-                    ).sum()
-                ),
+                "Downside triggers": int((exact_impact < -cap).sum()),
+                "Upside triggers": int((exact_impact > cap).sum()),
                 "Top-10 overlap vs raw F20": (
-                    f"{_top_overlap(rankable, 'shadow_f20', score_col, top_n)}/{top_n}"
+                    f"{_top_overlap(rankable, 'shadow_f20', exact_score_col, top_n)}/{top_n}"
                     if top_n
                     else "0/0"
                 ),
@@ -342,7 +439,7 @@ def summarize_composite_robustness(robust: pd.DataFrame) -> dict:
             "cap6_trigger_count": 0,
             "weight_summary": [],
             "guardrail_summary": [],
-            "integrity_match": False,
+            "anchor_integrity_pass": False,
         }
 
     total = int(len(robust))
@@ -353,16 +450,28 @@ def summarize_composite_robustness(robust: pd.DataFrame) -> dict:
     top_n = min(10, n)
 
     if top_n:
-        all_sets = [
-            _top_set(rankable, f"score_{_weight_tag(w)}", top_n)
-            for w in RANK_GRID
-        ]
+        all_sets = []
+        for weight in RANK_GRID:
+            tag = _weight_tag(weight)
+            score_col = (
+                f"score_{tag}"
+                if weight in ANCHOR_WEIGHTS
+                else f"score_{tag}_exact"
+            )
+            all_sets.append(_top_set(rankable, score_col, top_n))
+
         stable_all = len(set.intersection(*all_sets)) if all_sets else 0
 
-        center_sets = [
-            _top_set(rankable, f"score_{_weight_tag(w)}", top_n)
-            for w in CENTER_WEIGHTS
-        ]
+        center_sets = []
+        for weight in CENTER_WEIGHTS:
+            tag = _weight_tag(weight)
+            score_col = (
+                f"score_{tag}"
+                if weight in ANCHOR_WEIGHTS
+                else f"score_{tag}_exact"
+            )
+            center_sets.append(_top_set(rankable, score_col, top_n))
+
         stable_center = (
             len(set.intersection(*center_sets))
             if center_sets
@@ -377,13 +486,18 @@ def summarize_composite_robustness(robust: pd.DataFrame) -> dict:
         errors="coerce",
     ).dropna()
 
-    integrity_cols = (
-        "f10_match_v123a",
-        "f20_match_v123a",
-        "f30_match_v123a",
-    )
-    integrity_match = bool(
-        robust[list(integrity_cols)]
+    integrity_cols = []
+    for weight in ANCHOR_WEIGHTS:
+        tag = _weight_tag(weight)
+        integrity_cols.extend(
+            [
+                f"{tag}_score_match_v123a",
+                f"{tag}_rank_match_v123a",
+            ]
+        )
+
+    anchor_integrity_pass = bool(
+        robust[integrity_cols]
         .fillna(False)
         .all(axis=1)
         .all()
@@ -408,5 +522,5 @@ def summarize_composite_robustness(robust: pd.DataFrame) -> dict:
         ),
         "weight_summary": _weight_summary(rankable),
         "guardrail_summary": _guardrail_summary(rankable),
-        "integrity_match": integrity_match,
+        "anchor_integrity_pass": anchor_integrity_pass,
     }
