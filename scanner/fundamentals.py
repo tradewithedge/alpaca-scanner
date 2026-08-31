@@ -11,7 +11,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 
-FUNDAMENTALS_VERSION = "V1.2.2.2a1"
+FUNDAMENTALS_VERSION = "V1.2.3b2"
 
 SEC_TICKER_JSON_URL = "https://www.sec.gov/files/company_tickers.json"
 SEC_TICKER_TEXT_URL = "https://www.sec.gov/include/ticker.txt"
@@ -41,7 +41,7 @@ SEC_IDENTITY_MIRROR_LABEL = "SEC-derived pinned GitHub identity mirror"
 # contact email. We intentionally do NOT fabricate a user's contact email.
 DEFAULT_SEC_USER_AGENT = ""
 
-SEC_APPLICATION_NAME = "TradeWithEdge AlpacaScanner/1.2.2.2a1"
+SEC_APPLICATION_NAME = "TradeWithEdge AlpacaScanner/1.2.3b2"
 SEC_EMAIL_RE = re.compile(
     r"([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})",
     re.IGNORECASE,
@@ -1447,45 +1447,88 @@ def _latest_growth(series: pd.DataFrame, earnings: bool = False) -> dict:
     }
 
 def _latest_annual_growth(series: pd.DataFrame, earnings: bool = False) -> dict:
-    if series is None or len(series) < 2:
+    """Return the latest annual YoY only when a genuine prior-year comparator exists.
+
+    V1.2.3b2 integrity rule:
+    - the latest annual fact is always the current endpoint;
+    - the comparator must end 320–410 days earlier;
+    - older/non-consecutive history is never silently substituted;
+    - absence of a valid comparator is REVIEW/N/A, not structural FAIL;
+    - for revenue, a latest zero value with no valid comparator is explicitly
+      described as NO CURRENT REVENUE.
+    """
+    if series is None or len(series) < 1:
         return {
             "growth": np.nan,
             "state": "N/A",
             "end": None,
             "filed": None,
             "pair": None,
+            "pair_status": "NO ANNUAL FACT",
+            "pair_review_reason": "no annual fact available",
         }
 
     current = series.iloc[-1]
-    prior = series.iloc[-2]
+    current_end = current.get("end")
+    current_val = float(current["val"])
+
+    prior = None
+    prior_gap_days = None
+    for idx in range(len(series) - 2, -1, -1):
+        candidate = series.iloc[idx]
+        prior_end = candidate.get("end")
+        if not isinstance(current_end, date) or not isinstance(prior_end, date):
+            continue
+        gap_days = (current_end - prior_end).days
+        if 320 <= int(gap_days) <= 410:
+            prior = candidate
+            prior_gap_days = gap_days
+            break
+
+    if prior is None:
+        zero_revenue = (not earnings) and np.isfinite(current_val) and current_val == 0.0
+        state = "NO CURRENT REVENUE" if zero_revenue else "N/A"
+        reason = (
+            "latest annual fact has no valid 320–410 day prior-year comparator; "
+            "non-consecutive/stale revenue history was blocked"
+            if not earnings
+            else
+            "latest annual fact has no valid 320–410 day prior-year comparator; "
+            "non-consecutive/stale annual history was blocked"
+        )
+        return {
+            "growth": np.nan,
+            "state": state,
+            "end": current.get("end"),
+            "filed": current.get("filed"),
+            "pair": None,
+            "pair_status": "REVIEW",
+            "pair_review_reason": reason,
+        }
+
     growth, state = _growth(
-        float(current["val"]),
+        current_val,
         float(prior["val"]),
         earnings=earnings,
-    )
-    current_end = current.get("end")
-    prior_end = prior.get("end")
-    gap_days = (
-        (current_end - prior_end).days
-        if isinstance(current_end, date) and isinstance(prior_end, date)
-        else None
     )
     return {
         "growth": growth,
         "state": state,
-        "end": current["end"],
-        "filed": current["filed"],
+        "end": current.get("end"),
+        "filed": current.get("filed"),
         "pair": {
             "end": current.get("end"),
             "filed": current.get("filed"),
-            "current": float(current["val"]),
+            "current": current_val,
             "prior": float(prior["val"]),
             "growth": growth,
             "state": state,
-            "gap_days": gap_days,
+            "gap_days": prior_gap_days,
             "current_meta": _row_provenance(current),
             "prior_meta": _row_provenance(prior),
         },
+        "pair_status": "PASS",
+        "pair_review_reason": "",
     }
 
 def _interp_score(value, points) -> float:
@@ -1833,6 +1876,22 @@ def build_fundamental_snapshot(
             earn_a_growth.get("pair"), period="annual", as_of=as_of,
         ),
     }
+    if (
+        rev_a_growth.get("pair") is None
+        and rev_a_growth.get("pair_status") == "REVIEW"
+    ):
+        metric_integrity_checks["Revenue annual"]["reviews"] = [
+            rev_a_growth.get("pair_review_reason")
+            or "annual revenue comparator unavailable"
+        ]
+    if (
+        earn_a_growth.get("pair") is None
+        and earn_a_growth.get("pair_status") == "REVIEW"
+    ):
+        metric_integrity_checks["Earnings annual"]["reviews"] = [
+            earn_a_growth.get("pair_review_reason")
+            or "annual earnings comparator unavailable"
+        ]
     selection_checks = {
         "Revenue quarter latest-period": revenue["quarter_status"],
         "Revenue annual latest-period": revenue["annual_status"],
@@ -1972,6 +2031,12 @@ def build_fundamental_snapshot(
             if change >= 0.05: reasons.append("accelerating " + phrase)
             elif change <= -0.05: risks.append("decelerating " + phrase)
 
+    if rev_a_growth.get("state") == "NO CURRENT REVENUE":
+        risks.append(
+            "annual revenue YoY unavailable — NO CURRENT REVENUE; "
+            "non-consecutive/stale history was blocked"
+        )
+
     if revenue["continuity_status"] == "SPLIT CURRENT SOURCES":
         reasons.append("SEC revenue concept transition resolved with current quarter/FY sources")
     if revenue["continuity_notes"]:
@@ -2051,6 +2116,8 @@ def build_fundamental_snapshot(
         "earnings_valid_count": earn_q_growth["valid_count"],
         "revenue_annual_yoy": rev_a_growth["growth"],
         "revenue_annual_pair": rev_a_growth.get("pair"),
+        "revenue_annual_pair_status": rev_a_growth.get("pair_status", "PASS"),
+        "revenue_annual_pair_review_reason": rev_a_growth.get("pair_review_reason", ""),
         "revenue_annual_state": rev_a_growth["state"],
         "revenue_annual_end": rev_a_growth["end"],
         "earnings_annual_yoy": earn_a_growth["growth"],
