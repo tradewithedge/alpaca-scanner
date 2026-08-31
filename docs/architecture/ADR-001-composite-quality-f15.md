@@ -1,6 +1,6 @@
 # ADR-001 — Composite Quality Architecture: F15 Primary, F20 Shadow, No Hard Cap
 
-**Status:** Architecture Selected — implementation pending V1.2.3c  
+**Status:** Architecture Selected — V1.2.3c shadow implementation ready for live acceptance  
 **Date:** 31 August 2026  
 **Decision confidence:** Medium-High  
 **Scope:** Candidate desirability architecture only; not Entry Quality or trade actionability
@@ -137,6 +137,31 @@ This ADR does **not** alter:
 - candidate buckets;
 - trade decisions.
 
-## Implementation gate
+## V1.2.3c shadow implementation
 
-V1.2.3c may implement this ADR only in shadow mode first. Production ranking influence requires a separate acceptance decision.
+The first implementation of this ADR is complete in shadow mode:
+
+- `scanner/composite_architecture.py` is the selected-architecture layer.
+- It reuses V1.2.3b1 full-precision `score_f15_exact` / `rank_f15` rather than reconstructing F15 from rounded display values.
+- It reuses the accepted V1.2.3a F20 score/rank as the sensitivity benchmark.
+- It independently audits `0.595 × CQ + 0.255 × Leadership + 0.15 × Fundamental` against the b1 F15 exact score.
+- NORMAL / MATERIAL / HIGH IMPACT labels use the exact incremental F15 Fundamental contribution.
+- PROMOTION / PENALTY / NEUTRAL is shown separately for direction.
+- No hard impact cap is applied.
+- REVIEW/FAIL/unavailable fundamentals remain without a full Composite score/rank.
+- `app.py` presents this as Section 3F and explicitly states that official ranking, buckets, Entry Quality and trade decisions are unchanged.
+
+Offline regression result: **22/22 PASS** across retained V1.2.3b1, V1.2.3b2 and new V1.2.3c tests.
+
+## Live acceptance gate
+
+V1.2.3c remains shadow-only until a live Russell 2000 STRICT / Fundamental sample 50 run confirms:
+
+1. V1.2.3b1 anchor integrity still passes;
+2. V1.2.3c F15 formula integrity passes;
+3. F20 remains shadow-only;
+4. no hard cap is applied;
+5. REVIEW rows remain unranked; and
+6. official scanner ordering/actionability is unchanged.
+
+Production ranking influence requires a separate post-acceptance decision and is outside this ADR implementation gate.
