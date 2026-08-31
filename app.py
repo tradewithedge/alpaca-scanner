@@ -103,7 +103,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.3b1"
+APP_VERSION = "V1.2.3b2"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -113,14 +113,13 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Full-Precision Robustness Integrity"
+    "• Trade With Edge • Candidate Quality Engine • Pre-Revenue / Zero-Revenue Domain Integrity"
 )
 st.caption(
-    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.3b1 Full-Precision "
-    "Robustness Integrity Fix • V1.2.3a attribution remains accepted/frozen • "
-    "V1.2.3b weights and guardrails remain shadow-only • Candidate Quality, "
-    "Leadership, Fundamental Quality, Entry Quality, official ranking, buckets "
-    "and trade decisions remain unchanged"
+    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.3b2 Pre-Revenue / "
+    "Zero-Revenue Domain Integrity • V1.2.3b1 full-precision robustness remains "
+    "accepted • Candidate Quality, Leadership, Fundamental Quality, Composite "
+    "Quality, Entry Quality, official ranking, buckets and trade decisions remain unchanged"
 )
 
 
@@ -591,7 +590,7 @@ def render_fundamental_batch_coverage(scan, sample_size):
     st.subheader("3C) Fundamental Universe Coverage — Shadow Batch")
     st.info(
         "V1.2.2.3 FROZEN FUNDAMENTAL REFERENCE: this bounded audited SEC sample "
-        "is the accepted input to V1.2.3b1 full-precision robustness validation. It does NOT "
+        "is the accepted input to V1.2.3b2 domain-integrity validation. It does NOT "
         "alter Candidate Quality, Leadership, Fundamental Quality, scanner "
         "ranking, candidate buckets, Entry Quality, or trade decisions."
     )
@@ -670,7 +669,7 @@ def render_fundamental_batch_coverage(scan, sample_size):
     st.caption(
         "Selection order = official Candidate Quality descending, then "
         "Leadership Score, then Legacy RS. This frozen V1.2.2.3 sample is the "
-        "audited input to V1.2.3b1 robustness validation; official scanner order remains unchanged."
+        "audited input to V1.2.3b2 domain-integrity validation; official scanner order remains unchanged."
     )
 
     st.divider()

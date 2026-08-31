@@ -37,7 +37,8 @@ When proposing a feature, first ask: **Which roadmap stage does this belong to?*
 | V1.2.3 | Composite Candidate Quality Integration — Shadow Calibration | Calibration captured / not frozen |
 | V1.2.3a | Composite Attribution & Incremental Fundamental Impact | Accepted / Frozen |
 | V1.2.3b | Composite Weight Robustness & Guardrail Calibration | S&P evidence captured / precision fix required |
-| V1.2.3b1 | Full-Precision Robustness Integrity Fix | **CURRENT / READY FOR LIVE ACCEPTANCE** |
+| V1.2.3b1 | Full-Precision Robustness Integrity Fix | S&P 500 accepted / frozen |
+| V1.2.3b2 | Pre-Revenue / Zero-Revenue Domain Integrity | **CURRENT / READY FOR LIVE ACCEPTANCE** |
 | V1.3 | Entry Quality / Anti-Chase Engine | Planned |
 | V1.4 | Market Regime & Deployment Engine | Planned |
 | V1.5 | Earnings / Event Reliability Layer | Planned |
@@ -46,7 +47,7 @@ When proposing a feature, first ask: **Which roadmap stage does this belong to?*
 | V1.8 | Paper Trading & Trade Journal Integration | Planned |
 | V2.0 | Production-grade Daily Swing Scanner | Target |
 
-## Current Stage — V1.2.3b1 Full-Precision Robustness Integrity Fix
+## Current Stage — V1.2.3b2 Pre-Revenue / Zero-Revenue Domain Integrity
 
 ### Objective
 
@@ -247,3 +248,23 @@ The progress percentages describe implementation maturity, not expected trading 
   2. confirm FULL-PRECISION INTEGRITY PASS;
   3. confirm 3E F10/F20/F30 anchor metrics match 3D exactly;
   4. only then run Russell 2000 with 50-name sample.
+
+
+### V1.2.3b2 — Pre-Revenue / Zero-Revenue Domain Integrity
+- Status: **READY FOR LIVE ACCEPTANCE**
+- Trigger: Russell 2000 50-name sample exposed a hard `FAIL` on a sparse annual
+  revenue history (`Structurally suspicious SEC period pairing: Revenue annual`).
+- Generic fix — no ticker-specific rule:
+  - latest annual fact remains the current endpoint;
+  - prior-year comparator must end 320–410 days earlier;
+  - older/non-consecutive revenue history is blocked, never silently substituted;
+  - if a valid prior-year comparator is absent, annual YoY becomes N/A + REVIEW;
+  - if latest annual revenue is zero in that condition, state is explicitly
+    `NO CURRENT REVENUE`;
+  - genuine malformed current pairs remain hard FAIL.
+- No changes to Candidate Quality, Leadership, Fundamental Quality weights,
+  Composite Quality weights, guardrail candidates, Entry Quality, official
+  ranking, buckets, event gates or trade decisions.
+- Acceptance: rerun Russell 2000 STRICT with Fundamental sample = 50; the sparse
+  zero-revenue issuer should become REVIEW, and the hard FAIL count should fall
+  to zero if it was the sole failure.
