@@ -22,6 +22,7 @@ import scanner.fundamental_validation as fundamental_validation_module
 import scanner.fundamental_batch as fundamental_batch_module
 import scanner.composite_quality as composite_quality_module
 import scanner.composite_robustness as composite_robustness_module
+import scanner.composite_architecture as composite_architecture_module
 import scanner.leadership as leadership_module
 import scanner.regime as regime_module
 import scanner.scoring as scoring_module
@@ -37,6 +38,7 @@ for _module in (
     fundamental_batch_module,
     composite_quality_module,
     composite_robustness_module,
+    composite_architecture_module,
     leadership_module,
     regime_module,
     scoring_module,
@@ -90,6 +92,8 @@ build_shadow_composite_table = composite_quality_module.build_shadow_composite_t
 summarize_shadow_composite = composite_quality_module.summarize_shadow_composite
 build_composite_robustness_table = composite_robustness_module.build_composite_robustness_table
 summarize_composite_robustness = composite_robustness_module.summarize_composite_robustness
+build_selected_composite_table = composite_architecture_module.build_selected_composite_table
+summarize_selected_composite = composite_architecture_module.summarize_selected_composite
 add_leadership_features = leadership_module.add_leadership_features
 aggregate_regime = regime_module.aggregate_regime
 with_breadth = regime_module.with_breadth
@@ -103,7 +107,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.3b2"
+APP_VERSION = "V1.2.3c"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -113,13 +117,13 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Pre-Revenue / Zero-Revenue Domain Integrity"
+    "• Trade With Edge • Candidate Quality Engine • Composite Architecture Selection & Explainable Guardrail"
 )
 st.caption(
-    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.3b2 Pre-Revenue / "
-    "Zero-Revenue Domain Integrity • V1.2.3b1 full-precision robustness remains "
-    "accepted • Candidate Quality, Leadership, Fundamental Quality, Composite "
-    "Quality, Entry Quality, official ranking, buckets and trade decisions remain unchanged"
+    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.3c Composite Architecture "
+    "Selection • F15 selected in SHADOW MODE: 59.5% Candidate Quality + 25.5% "
+    "Leadership + 15% Fundamental Quality • F20 remains a sensitivity benchmark • "
+    "No hard impact cap • official ranking, buckets, Entry Quality and trade decisions remain unchanged"
 )
 
 
@@ -669,7 +673,7 @@ def render_fundamental_batch_coverage(scan, sample_size):
     st.caption(
         "Selection order = official Candidate Quality descending, then "
         "Leadership Score, then Legacy RS. This frozen V1.2.2.3 sample is the "
-        "audited input to V1.2.3b2 domain-integrity validation; official scanner order remains unchanged."
+        "audited input to V1.2.3c selected-architecture shadow validation; official scanner order remains unchanged."
     )
 
     st.divider()
@@ -678,6 +682,8 @@ def render_fundamental_batch_coverage(scan, sample_size):
     st.divider()
     render_composite_robustness_calibration(table)
 
+    st.divider()
+    render_selected_composite_architecture(table)
 
 
 
@@ -1154,9 +1160,133 @@ def render_composite_robustness_calibration(batch_table):
         )
 
     st.caption(
-        "V1.2.3b freeze discipline: choose neither a production Fundamental "
-        "weight nor a guardrail from one universe. Compare S&P 500 and Russell "
-        "2000 with 50-name samples first."
+        "V1.2.3b historical calibration view retained for auditability. The completed "
+        "S&P 500 + Russell 2000 evidence is the basis for V1.2.3c selecting F15; "
+        "the ±4/±6/±8 cap rows remain simulations only and are not enforced."
+    )
+
+
+def render_selected_composite_architecture(batch_table):
+    """V1.2.3c selected F15 architecture; shadow-only first implementation."""
+    if batch_table is None or batch_table.empty:
+        return
+
+    selected = build_selected_composite_table(batch_table)
+    summary = summarize_selected_composite(selected)
+
+    st.subheader("3F) Composite Architecture Selection — F15 Explainable Shadow")
+    st.info(
+        "V1.2.3c ARCHITECTURE SELECTED / SHADOW IMPLEMENTATION: Composite F15 = "
+        "59.5% Candidate Quality + 25.5% Leadership + 15% Fundamental Quality. "
+        "F20 remains visible only as a sensitivity benchmark. This section does "
+        "NOT change official Candidate Quality, scanner ordering, buckets, Entry "
+        "Quality or trade decisions."
+    )
+
+    st.caption(
+        "Explainable guardrail = classification, not score manipulation. Incremental "
+        "F15 Fundamental impact is NORMAL when |impact| <4 pts, MATERIAL at 4–6 pts, "
+        "and HIGH IMPACT above 6 pts. No ±4/±6/±8 hard cap is applied."
+    )
+
+    integrity_ok = bool(summary.get("f15_formula_integrity_pass")) and bool(
+        summary.get("anchor_integrity_pass")
+    )
+    if integrity_ok:
+        st.success(
+            "V1.2.3c INTEGRITY PASS: F15 matches the exact 59.5/25.5/15 formula, "
+            "and accepted V1.2.3a F10/F20/F30 anchor integrity remains intact."
+        )
+    else:
+        st.error(
+            "V1.2.3c INTEGRITY FAIL: selected F15 formula or accepted anchor integrity "
+            "did not match. Do not use this section for acceptance."
+        )
+
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1.metric("F15 rankable", f"{summary.get('rankable', 0)}/{summary.get('total', 0)}")
+    m2.metric("Selected formula", "59.5 / 25.5 / 15")
+    m3.metric("F15↔F20 Top-10", f"{summary.get('f15_f20_top10_overlap', 0)}/10")
+    spearman = summary.get("f15_f20_spearman")
+    m4.metric("F15↔F20 Spearman", "—" if spearman is None else f"{spearman:.3f}")
+    m5.metric("HIGH IMPACT", f"{summary.get('high_impact', 0)}")
+    m6.metric("Hard score cap", "NONE")
+
+    i1, i2, i3 = st.columns(3)
+    i1.metric("NORMAL impact", f"{summary.get('normal', 0)}")
+    i2.metric("MATERIAL impact", f"{summary.get('material', 0)}")
+    med = summary.get("median_abs_f15_fund_impact")
+    i3.metric("Median |F15 F impact|", "—" if med is None else f"{med:.2f} pts")
+
+    st.markdown("**Selected F15 architecture table**")
+    display = selected.copy()
+    display["_rank_sort"] = pd.to_numeric(
+        display.get("composite_f15_rank"), errors="coerce"
+    )
+    display = display.sort_values(
+        ["_rank_sort", "official_candidate_quality"],
+        ascending=[True, False],
+        na_position="last",
+    ).drop(columns="_rank_sort")
+
+    display_cols = [
+        "symbol",
+        "official_candidate_quality",
+        "leadership_score",
+        "fundamental_score",
+        "composite_f15",
+        "composite_f15_grade",
+        "composite_f15_rank",
+        "f15_fund_impact_pts",
+        "fundamental_impact_label",
+        "shadow_f20_reference",
+        "shadow_f20_reference_rank",
+        "quality_profile",
+        "composite_status",
+    ]
+    st.dataframe(
+        display[[c for c in display_cols if c in display.columns]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    high = selected[
+        selected.get("fundamental_impact_state", pd.Series(dtype=str)).astype(str)
+        == "HIGH IMPACT"
+    ].copy()
+    if not high.empty:
+        st.markdown("**HIGH IMPACT explainability watch — no score rescue/cap**")
+        high["_abs"] = pd.to_numeric(
+            high.get("f15_fund_impact_exact_pts"), errors="coerce"
+        ).abs()
+        high = high.sort_values("_abs", ascending=False).drop(columns="_abs")
+        st.dataframe(
+            high[
+                [
+                    c
+                    for c in [
+                        "symbol",
+                        "official_candidate_quality",
+                        "leadership_score",
+                        "fundamental_score",
+                        "composite_f15",
+                        "f15_fund_impact_pts",
+                        "fundamental_impact_direction",
+                        "quality_profile",
+                    ]
+                    if c in high.columns
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.caption(
+        "Architecture interpretation: Candidate Quality remains technical truth; "
+        "Leadership remains relative-strength/resilience truth; Fundamental Quality "
+        "remains business-performance truth; Composite F15 is the combined shadow "
+        "assessment; Entry Quality remains the separate timing/actionability gate. "
+        "REVIEW/FAIL/unavailable fundamentals receive no full Composite score or rank."
     )
 
 

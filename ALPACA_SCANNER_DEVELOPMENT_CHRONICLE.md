@@ -825,7 +825,7 @@ The BRZE result is informative: capping one stock's downside contribution does n
 
 # 6. V1.2.3c — Composite Architecture Selection
 
-**Status:** ARCHITECTURE SELECTED / IMPLEMENTATION NEXT  
+**Status:** IMPLEMENTED / READY FOR LIVE ACCEPTANCE  
 **Decision confidence:** Medium-High  
 **ADR:** `docs/architecture/ADR-001-composite-quality-f15.md`
 
@@ -928,6 +928,88 @@ Until separately accepted:
 7. Existing V1.2.3a/b1 anchor integrity continues to pass.
 8. No official ranking, bucket or trade-decision changes occur in the first V1.2.3c implementation.
 
+
+## 6.7 V1.2.3c implementation patch
+
+**Implementation status:** READY FOR LIVE ACCEPTANCE  
+**Mode:** SHADOW ONLY  
+**Production-ranking authority:** NONE
+
+### Objective
+
+Implement the already-selected F15 architecture without altering the accepted V1.2.3a attribution layer, V1.2.3b1 precision authority, official scanner order, Entry Quality or trade decisions.
+
+### Architecture delta — BEFORE vs AFTER
+
+**Before:** F15 existed only as a robustness interpolation point inside V1.2.3b1; F20 was the principal shadow reference used during calibration. No selected-architecture presentation layer existed.
+
+**After:** F15 is the selected Composite architecture in a new shadow-only layer. The exact internal formula is `59.5% CQ + 25.5% Leadership + 15% Fundamental`. F20 remains visible as a sensitivity benchmark. Fundamental impact is labeled NORMAL / MATERIAL / HIGH IMPACT, but no hard score cap is applied.
+
+### Implementation architecture
+
+- New module: `scanner/composite_architecture.py`.
+- The module reuses `build_composite_robustness_table()` so F15 comes from the accepted full-precision V1.2.3b1 interpolation path rather than a new rounded reconstruction.
+- F20 reference score/rank is reused from the accepted V1.2.3a anchor path.
+- An independent duplicate formula audit verifies that the selected F15 score equals `0.595 × CQ + 0.255 × Leadership + 0.15 × Fundamental` to machine precision.
+- Explainability thresholds use the exact incremental F15 Fundamental contribution:
+  - NORMAL: absolute impact <4 points;
+  - MATERIAL: 4–6 points inclusive;
+  - HIGH IMPACT: >6 points.
+- Direction is shown separately as PROMOTION / PENALTY / NEUTRAL.
+- No ±4/±6/±8 hard cap is applied to F15.
+- REVIEW/FAIL/unavailable Fundamental Quality remains unscored and unranked; no imputation.
+- `app.py` adds Section **3F) Composite Architecture Selection — F15 Explainable Shadow** after the historical 3D/3E audit views.
+
+### What did not change
+
+- Candidate Quality calculation or official rank;
+- Leadership calculation;
+- Fundamental Quality calculation;
+- accepted V1.2.3a F10/F20/F30 attribution formulas;
+- V1.2.3b1 full-precision robustness logic;
+- V1.2.3b2 SEC domain-integrity logic;
+- Entry Quality;
+- anti-chase rules;
+- event gates;
+- candidate buckets;
+- trade decisions;
+- official scanner ordering.
+
+### Offline validation performed
+
+Regression suite executed against the implementation build:
+
+- V1.2.3b1 full-precision robustness tests: **10/10 PASS**;
+- V1.2.3b2 pre-revenue/zero-revenue tests: **5/5 PASS**;
+- V1.2.3c selected-architecture tests: **7/7 PASS**;
+- combined result: **22/22 PASS**.
+
+The V1.2.3c tests explicitly verify exact weights, formula integrity, F20 anchor reuse, impact-label boundaries, absence of hard score capping, REVIEW no-imputation/no-rank behavior, and source-dataframe immutability.
+
+### Live acceptance still required
+
+Use Russell 2000 STRICT with Fundamental sample = 50 because this universe simultaneously exercises rankable names, high Fundamental penalties and the known SRRK REVIEW domain case. Acceptance requires:
+
+1. 3E continues to show **FULL-PRECISION INTEGRITY PASS**;
+2. 3F shows **V1.2.3c INTEGRITY PASS**;
+3. selected formula displays `59.5 / 25.5 / 15`;
+4. F20 remains a visible shadow sensitivity reference;
+5. Hard score cap displays `NONE`;
+6. impact states follow NORMAL / MATERIAL / HIGH IMPACT thresholds;
+7. SRRK/other REVIEW rows have no full Composite score/rank;
+8. official ranking, buckets, Entry Quality and trade decisions remain unchanged.
+
+### Known limitations
+
+- This implementation validates architecture mechanics and transparency, not forward-return edge.
+- F15 remains shadow-only until live acceptance.
+- The selected weight can still materially penalize weak-fundamental technical leaders; the architecture intentionally exposes rather than silently caps that conflict.
+- Broader historical/forward testing remains necessary before Composite Quality can influence production ordering.
+
+### Frozen-principle impact
+
+No frozen principle is relaxed. COMP-01, FQ-02, ENTRY-01, DATA-01, CAL-01 and FREEZE-01 are explicitly preserved.
+
 ---
 
 # 7. Validation Ledger
@@ -946,6 +1028,7 @@ Until separately accepted:
 | Full-precision | Rounded No-Fund display value altered robustness calculations | Use unrounded internals; reuse V1.2.3a anchors | FULL-PRECISION INTEGRITY PASS |
 | BRZE attribution | Leadership promotion and Fundamental demotion could be conflated | Separate Leadership impact from incremental Fundamental impact | V1.2.3a accepted |
 | SRRK | Sparse annual revenue history created non-consecutive annual pair and hard FAIL | Require 320–410 day prior-year comparator; otherwise N/A/REVIEW; explicit NO CURRENT REVENUE | Russell batch FAIL 1→0; accepted |
+| V1.2.3c implementation | Selected F15 architecture needed a production-safe shadow implementation without disturbing accepted anchors or official ranking | New `composite_architecture.py`; exact F15 audit; F20 anchor reuse; explainable impact states; no hard cap | Offline 22/22 PASS; live acceptance pending |
 
 ---
 
@@ -955,7 +1038,7 @@ Until separately accepted:
 2. **Sample breadth is bounded.** Current architecture decision relies on 50-name S&P 500 and 50-name Russell 2000 calibration samples, not full-universe historical backtests.
 3. **Sector/domain specialization remains incomplete.** Generic SEC concepts may remain insufficient for some banks/financials or unusual reporting structures.
 4. **Fundamental impact is asymmetric in observed samples.** Guardrail triggers were entirely downside in both S&P and Russell F20 runs, suggesting Fundamentals often acted more as a penalty mechanism than a promoter in these samples.
-5. **F15 is selected, not production-authorized.** The first V1.2.3c build must remain shadow-only until acceptance.
+5. **F15 is implemented but not production-authorized.** V1.2.3c is shadow-only and still requires live acceptance before freeze.
 6. **Entry Quality remains independent.** A high Composite score does not imply an actionable entry.
 7. **Event-date reliability is not Fundamental Quality.** Earnings timing/proximity belongs to a separate later event-reliability layer.
 8. **Architecture may need recalibration after backtesting.** F15 should be revisited only if broader historical/forward evidence materially contradicts the current robustness findings.
@@ -1016,7 +1099,7 @@ Until separately accepted:
 | V1.2.3b | Robustness | F05–F30 + ±4/±6/±8 simulations | Research |
 | V1.2.3b1 | Precision integrity | Full-precision ranking; anchor reuse | Frozen |
 | V1.2.3b2 | Pre-revenue integrity | Genuine annual comparator / REVIEW semantics | Frozen |
-| V1.2.3c | Composite architecture | F15 selected; explainable impact; no hard cap | Architecture selected / implementation next |
+| V1.2.3c | Composite architecture | F15 selected; explainable impact; no hard cap | Implemented / live acceptance pending |
 
 ---
 

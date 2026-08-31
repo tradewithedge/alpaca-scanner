@@ -40,7 +40,7 @@ When proposing a feature, first ask: **Which roadmap stage does this belong to?*
 | V1.2.3b | Composite Weight Robustness & Guardrail Calibration | S&P evidence captured / precision fix required |
 | V1.2.3b1 | Full-Precision Robustness Integrity Fix | Accepted / Frozen |
 | V1.2.3b2 | Pre-Revenue / Zero-Revenue Domain Integrity | Accepted / Frozen |
-| V1.2.3c | Composite Architecture Selection & Explainable Guardrail Layer | **ARCHITECTURE SELECTED / IMPLEMENTATION NEXT** |
+| V1.2.3c | Composite Architecture Selection & Explainable Guardrail Layer | **IMPLEMENTED / READY FOR LIVE ACCEPTANCE** |
 | V1.3 | Entry Quality / Anti-Chase Engine | Planned |
 | V1.4 | Market Regime & Deployment Engine | Planned |
 | V1.5 | Earnings / Event Reliability Layer | Planned |
@@ -66,6 +66,10 @@ The completed S&P 500 and Russell 2000 calibration selects **F15** as the primar
 - REVIEW/FAIL/unavailable fundamentals remain unranked for full Composite; no neutral/average imputation.
 - Candidate Quality, Leadership, Fundamental Quality, Composite Quality and Entry Quality remain separately visible.
 - Initial V1.2.3c remains **shadow-only**: no official scanner ordering, bucket, Entry Quality or trade-decision changes.
+
+### Implementation status
+
+The first V1.2.3c shadow implementation is complete and ready for live acceptance. It adds an explainable Section 3F without changing any official ranking or actionability path. Offline regression: **22/22 PASS**.
 
 ### Why F15
 
@@ -94,7 +98,7 @@ The new authoritative history file is `ALPACA_SCANNER_DEVELOPMENT_CHRONICLE.md`.
 - Foundation: `████████████████████` 100%
 - Market-data integrity: `███████████████████░` 95%
 - Scanner auditability: `████████████████████` 100%
-- Candidate intelligence: `█████████████████░░░` 85% — technical, leadership and fundamental layers are frozen; F15 composite architecture is selected and pending V1.2.3c shadow implementation
+- Candidate intelligence: `██████████████████░░` 90% — F15 composite architecture is implemented in shadow mode and awaiting V1.2.3c live acceptance
 - Entry intelligence: `████████░░░░░░░░░░░░` 40%
 - Fundamental-performance intelligence: `██████████████████░░` 90% — single-ticker integrity and representative bounded-universe coverage accepted/frozen
 - Event-date confidence: `██░░░░░░░░░░░░░░░░░░` 10%
@@ -297,7 +301,7 @@ The progress percentages describe implementation maturity, not expected trading 
 
 
 ### V1.2.3c — Composite Architecture Selection & Explainable Guardrail Layer
-- Status: **ARCHITECTURE SELECTED / IMPLEMENTATION NEXT**
+- Status: **IMPLEMENTED / READY FOR LIVE ACCEPTANCE**
 - Primary Composite candidate: **F15** = 59.5% Candidate Quality + 25.5% Leadership + 15% Fundamental Quality.
 - F20 remains shadow sensitivity benchmark.
 - No hard Fundamental-impact cap is selected initially.
@@ -306,3 +310,16 @@ The progress percentages describe implementation maturity, not expected trading 
 - Initial implementation remains shadow-only and cannot change official Candidate Quality, scanner ranking, buckets, Entry Quality, event gates or trade decisions.
 - Architecture rationale and limitations are recorded in `docs/architecture/ADR-001-composite-quality-f15.md`.
 - Full history and validation evidence are recorded in `ALPACA_SCANNER_DEVELOPMENT_CHRONICLE.md`.
+- Implementation files:
+  - `app.py` — adds Section 3F selected-architecture shadow UI.
+  - `scanner/composite_architecture.py` — new F15 selection/explainability layer; reuses V1.2.3b1 full-precision F15 and accepted V1.2.3a F20 anchors.
+  - `tests/test_composite_architecture_v123c.py` — exact formula, no-cap, label-boundary, no-imputation and anchor-preservation tests.
+- Offline regression result: **22/22 PASS** across V1.2.3b1 precision, V1.2.3b2 pre-revenue and V1.2.3c architecture tests.
+- Live acceptance sequence:
+  1. deploy V1.2.3c;
+  2. run Russell 2000 STRICT, Fundamental sample = 50;
+  3. confirm 3E still shows FULL-PRECISION INTEGRITY PASS;
+  4. confirm 3F shows `V1.2.3c INTEGRITY PASS`, formula `59.5 / 25.5 / 15`, Hard score cap `NONE`, and F20 sensitivity reference;
+  5. confirm SRRK/other REVIEW rows receive no full F15 Composite score/rank;
+  6. confirm official scanner ordering, buckets, Entry Quality and trade decisions remain unchanged;
+  7. after live acceptance, update Chronicle/ADR status to ACCEPTED / FROZEN before moving to V1.3.
