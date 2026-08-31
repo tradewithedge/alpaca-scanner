@@ -20,6 +20,7 @@ import scanner.inspector as inspector_module
 import scanner.fundamentals as fundamentals_module
 import scanner.fundamental_validation as fundamental_validation_module
 import scanner.fundamental_batch as fundamental_batch_module
+import scanner.composite_quality as composite_quality_module
 import scanner.leadership as leadership_module
 import scanner.regime as regime_module
 import scanner.scoring as scoring_module
@@ -33,6 +34,7 @@ for _module in (
     fundamentals_module,
     fundamental_validation_module,
     fundamental_batch_module,
+    composite_quality_module,
     leadership_module,
     regime_module,
     scoring_module,
@@ -82,6 +84,8 @@ summarize_fund_validation = fundamental_validation_module.summarize_validation_r
 select_fundamental_batch_candidates = fundamental_batch_module.select_batch_candidates
 fundamental_batch_row = fundamental_batch_module.batch_row
 summarize_fundamental_batch = fundamental_batch_module.summarize_batch_rows
+build_shadow_composite_table = composite_quality_module.build_shadow_composite_table
+summarize_shadow_composite = composite_quality_module.summarize_shadow_composite
 add_leadership_features = leadership_module.add_leadership_features
 aggregate_regime = regime_module.aggregate_regime
 with_breadth = regime_module.with_breadth
@@ -95,7 +99,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.2.3"
+APP_VERSION = "V1.2.3"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -105,13 +109,13 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Fundamental Quality Engine • Universe Coverage & Cache Validation"
+    "• Trade With Edge • Candidate Quality Engine • Composite Quality Shadow Calibration"
 )
 st.caption(
-    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.2.3 Fundamental "
-    "Universe Coverage & Cache Validation • V1.2.2.2a1 extraction integrity "
-    "is frozen • Fundamentals remain SHADOW MODE and do not alter official "
-    "Candidate Quality, buckets, Entry Quality, or trade decisions"
+    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.3 Composite Candidate "
+    "Quality Integration — Shadow Calibration • V1.2.2 Fundamental Quality "
+    "Engine is frozen • Official Candidate Quality, Entry Quality, buckets and "
+    "trade decisions remain unchanged"
 )
 
 
@@ -496,7 +500,7 @@ def render_fundamental_validation_suite():
 
 
 def render_fundamental_batch_coverage(scan, sample_size):
-    """V1.2.2.3 bounded fundamental batch coverage in SHADOW MODE."""
+    """Frozen V1.2.2.3 bounded fundamental batch support layer."""
     if scan is None:
         st.info(
             "Run Scanner first. Fundamental batch coverage only evaluates "
@@ -660,8 +664,175 @@ def render_fundamental_batch_coverage(scan, sample_size):
 
     st.caption(
         "Selection order = official Candidate Quality descending, then "
-        "Leadership Score, then Legacy RS. Fundamental Quality is display-only "
-        "and cannot change this order in V1.2.2.3."
+        "Leadership Score, then Legacy RS. This frozen V1.2.2.3 sample is the "
+        "audited input to V1.2.3 shadow calibration; official scanner order remains unchanged."
+    )
+
+    st.divider()
+    render_shadow_composite_calibration(table)
+
+
+
+
+def render_shadow_composite_calibration(batch_table):
+    """V1.2.3 shadow-only composite calibration; never changes scanner state."""
+    if batch_table is None or batch_table.empty:
+        st.info(
+            "Build a Fundamental Batch Coverage sample first. The composite "
+            "calibration uses that same audited sample and makes no new SEC calls."
+        )
+        return
+
+    composite = build_shadow_composite_table(batch_table)
+    summary = summarize_shadow_composite(composite)
+
+    st.subheader("3D) Composite Candidate Quality — Shadow Calibration")
+    st.info(
+        "V1.2.3 SHADOW MODE: Technical Candidate Quality, Leadership and "
+        "Fundamental Quality remain separately visible. The composite scores "
+        "below are calibration diagnostics only; they do NOT replace official "
+        "Candidate Quality, scanner ranking, buckets, Entry Quality, or trade decisions."
+    )
+    st.caption(
+        "Calibration family: No-Fund reference = 70% official Candidate Quality "
+        "+ 30% Leadership. Fundamental scenarios blend that reference with "
+        "10%, 20% or 30% Fundamental Quality. Missing/REVIEW fundamentals are "
+        "never imputed with a neutral value."
+    )
+
+    w1, w2, w3, w4 = st.columns(4)
+    w1.metric("No-Fund reference", "70% CQ + 30% L")
+    w2.metric("F10 scenario", "63% CQ + 27% L + 10% F")
+    w3.metric("F20 primary shadow", "56% CQ + 24% L + 20% F")
+    w4.metric("F30 scenario", "49% CQ + 21% L + 30% F")
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric(
+        "Composite rankable",
+        f"{summary.get('rankable', 0)}/{summary.get('total', 0)}",
+    )
+    c2.metric(
+        "Top-10 overlap",
+        f"{summary.get('top10_overlap', 0)}/{summary.get('top_n', 0)}",
+    )
+
+    corr = summary.get("spearman_corr")
+    c3.metric("Rank correlation", "—" if corr is None else f"{corr:.3f}")
+
+    shift = summary.get("median_abs_rank_shift")
+    c4.metric("Median |rank shift|", "—" if shift is None else f"{shift:.1f}")
+
+    impact = summary.get("mean_abs_f20_impact")
+    c5.metric(
+        "Mean |F20 impact|",
+        "—" if impact is None else f"{impact:.1f} pts",
+    )
+    c6.metric("Full alignment", f"{summary.get('full_alignment', 0)}")
+
+    review_count = summary.get("unranked_fundamental_review", 0)
+    if review_count:
+        st.warning(
+            f"{review_count} sampled candidate(s) are intentionally excluded "
+            "from full composite ranking because Fundamental Quality is REVIEW, "
+            "FAIL, or unavailable. No average/neutral value is substituted."
+        )
+
+    if summary.get("rankable", 0):
+        st.success(
+            "Shadow composite built successfully. Official scanner order remains "
+            "frozen; use rank shifts and scenario spread only for calibration."
+        )
+
+    display_cols = [
+        "symbol",
+        "official_candidate_quality",
+        "leadership_score",
+        "fundamental_score",
+        "technical_leadership_reference",
+        "shadow_f10",
+        "shadow_f20",
+        "shadow_f20_grade",
+        "shadow_f30",
+        "f20_impact_pts",
+        "official_rank",
+        "shadow_f20_rank",
+        "rank_change",
+        "scenario_spread_pts",
+        "quality_profile",
+        "fundamental_confidence",
+        "batch_status",
+    ]
+
+    ranked_display = composite.copy()
+    ranked_display["_display_score"] = pd.to_numeric(
+        ranked_display.get("shadow_f20"),
+        errors="coerce",
+    )
+    ranked_display = ranked_display.sort_values(
+        ["_display_score", "official_candidate_quality"],
+        ascending=[False, False],
+        na_position="last",
+    ).drop(columns="_display_score")
+
+    st.dataframe(
+        ranked_display[
+            [c for c in display_cols if c in ranked_display.columns]
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.caption(
+        "Rank change: positive = promoted by F20 versus official Candidate Quality "
+        "within the same rankable sample; negative = demoted. Quality profile is "
+        "descriptive only, never a scanner gate."
+    )
+
+    rankable = composite[
+        pd.to_numeric(composite.get("shadow_f20"), errors="coerce").notna()
+    ].copy()
+
+    if not rankable.empty:
+        movers = rankable.sort_values("rank_change", ascending=False)
+        left, right = st.columns(2)
+
+        with left:
+            st.markdown("**Largest F20 promotions**")
+            st.dataframe(
+                movers.head(5)[
+                    [
+                        "symbol",
+                        "official_candidate_quality",
+                        "fundamental_score",
+                        "shadow_f20",
+                        "rank_change",
+                        "quality_profile",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        with right:
+            st.markdown("**Largest F20 demotions**")
+            st.dataframe(
+                movers.tail(5).sort_values("rank_change")[
+                    [
+                        "symbol",
+                        "official_candidate_quality",
+                        "fundamental_score",
+                        "shadow_f20",
+                        "rank_change",
+                        "quality_profile",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    st.caption(
+        "Calibration discipline: no permanent fundamental weight will be chosen "
+        "from one scan. Compare representative S&P 500 and Russell 2000 results first."
     )
 
 
