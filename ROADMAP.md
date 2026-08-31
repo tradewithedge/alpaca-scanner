@@ -20,11 +20,19 @@ When proposing a feature, first ask: **Which roadmap stage does this belong to?*
 
 | Version | Objective | Status |
 |---|---|---|
-| V1.0 | Working Alpaca + Streamlit scanner architecture | Complete |
-| V1.1 | Explicit universes + persistent quality screening | Complete |
-| V1.1.1 | Consolidated SIP data integrity | Complete |
-| V1.1.2 | Scanner Audit Integrity | **Current** |
-| V1.2 | Candidate Quality Engine | Planned |
+| V1.0 | Working Alpaca + Streamlit scanner architecture | Complete / Frozen |
+| V1.1 | Explicit universes + persistent quality screening | Complete / Frozen |
+| V1.1.1 | Consolidated SIP data integrity | Complete / Frozen |
+| V1.1.2 | Scanner Audit Integrity | Complete / Frozen |
+| V1.2 | Candidate Quality Engine | **CURRENT** |
+| V1.2.1 | Relative Leadership & Market-Stress Resilience | Complete / Frozen |
+| V1.2.1.1 | Leadership explainability | Complete / Frozen |
+| V1.2.1.2–V1.2.1.3c | Ticker Inspector utility/reference engine | Complete / Frozen |
+| V1.2.2 | Fundamental Quality Engine | **CURRENT** |
+| V1.2.2.2 | Fundamental Metric Integrity & Cross-Company Validation | Live validation found P1 concept-continuity issue |
+| V1.2.2.2a | SEC Concept Continuity & Latest-Period Integrity | **CURRENT / READY FOR LIVE ACCEPTANCE** |
+| V1.2.2.1 | Revenue & Earnings Growth — shadow validation | Complete / superseded |
+| V1.2.2.1a–V1.2.2.1b1 | SEC access / identity / Fair Access integrity | Complete / Frozen |
 | V1.3 | Entry Quality / Anti-Chase Engine | Planned |
 | V1.4 | Market Regime & Deployment Engine | Planned |
 | V1.5 | Earnings / Event Reliability Layer | Planned |
@@ -33,28 +41,88 @@ When proposing a feature, first ask: **Which roadmap stage does this belong to?*
 | V1.8 | Paper Trading & Trade Journal Integration | Planned |
 | V2.0 | Production-grade Daily Swing Scanner | Target |
 
-## Current Stage — V1.1.2 Scanner Audit Integrity
+## Current Stage — V1.2.2.2a SEC Concept Continuity & Latest-Period Integrity
 
-Definition of done:
+### Objective
 
-- Full funnel is visible: universe → Alpaca match → SIP data → price → liquidity → deep scan → history → quality → bucket.
-- True SIP liquidity-pass count is separate from the deep-scan cap.
-- Every persistent-quality stock reconciles into one visible bucket, including `WAIT / ENTRY NOT READY`.
-- U.S. Market Regime is fixed from broad-market proxies; selected-universe breadth is separate.
-- Deployment score is explicitly labelled as the market/breadth blend used by actionability logic.
-- Missing SIP/history counts and liquidity percentile diagnostics are visible.
-- Scanner shows cutoff-near liquidity observations for audit.
-- No silent source/data fallback.
+Determine whether a technically strong stock is also backed by durable business growth.
+
+### First validation scope
+
+- Official SEC EDGAR CompanyFacts only.
+- Latest-quarter revenue YoY growth.
+- Latest-quarter earnings YoY growth, preferring diluted EPS and explicitly disclosing a net-income fallback.
+- Revenue and earnings growth acceleration/deceleration using real numeric changes.
+- Recent positive YoY growth consistency.
+- Latest fiscal-year revenue and earnings growth as longer-term confirmation.
+- Fundamental Quality Score / Grade in **SHADOW MODE**.
+- Explicit Fundamental Data Confidence: HIGH / MEDIUM / LOW / UNKNOWN.
+- Ticker Inspector and selected Candidate Detail receive the same explainable view.
+- No batch fundamental fetch across the universe yet.
+- No change to Persistent Quality, Candidate Quality, Leadership, Entry Quality, buckets, or trade decisions until validation is complete.
+
+### Boundary with V1.5
+
+V1.2.2 measures **reported business performance**.
+
+V1.5 remains responsible for **event timing/reliability**, including the next earnings date and fail-closed event-risk handling.
 
 ## Progress Snapshot
 
 - Foundation: `████████████████████` 100%
-- Market-data integrity: `██████████████████░░` 90%
-- Scanner auditability: `████████████████░░░░` 80% after V1.1.2 implementation; live verification still required
-- Candidate intelligence: `██████████░░░░░░░░░░` 50%
+- Market-data integrity: `███████████████████░` 95%
+- Scanner auditability: `████████████████████` 100%
+- Candidate intelligence: `███████████████░░░░░` 75% entering V1.2.2
 - Entry intelligence: `████████░░░░░░░░░░░░` 40%
-- Event/fundamental confidence: `██░░░░░░░░░░░░░░░░░░` 10%
+- Fundamental-performance intelligence: `████████████░░░░░░░░` 60% after SEC access acceptance; cross-company metric integrity validation in progress
+- Event-date confidence: `██░░░░░░░░░░░░░░░░░░` 10%
 - Validation/backtesting: `░░░░░░░░░░░░░░░░░░░░` 0%
 - Paper execution/journal: `░░░░░░░░░░░░░░░░░░░░` 0%
 
 The progress percentages describe implementation maturity, not expected trading performance.
+
+
+### V1.2.2.1b — SEC Identity Transport Bypass
+- Status: **READY FOR LIVE ACCEPTANCE**
+- Scope: ticker→CIK transport only; financial values remain official SEC CompanyFacts.
+- Reason: Streamlit Cloud live test returned HTTP 403 from all www.sec.gov identity endpoints.
+- Frozen: Candidate Quality, Leadership, Entry Quality, scanner gates, buckets, trade decisions.
+
+
+### V1.2.2.1b1 — SEC Fair Access / CompanyFacts Connectivity Validation
+- Status: **ACCEPTED / FROZEN**
+- Scope: declared User-Agent/contact validation and CompanyFacts connectivity diagnosis.
+- Financial authority remains official SEC CompanyFacts.
+- Candidate/Leadership/Entry/bucket logic remains frozen.
+
+
+### V1.2.2.2 — Fundamental Metric Integrity & Cross-Company Validation
+- Status: **READY FOR LIVE ACCEPTANCE**
+- Scope: validate the exact SEC concept/unit/period pairs used in revenue and earnings YoY calculations.
+- Adds fail-visible provenance for quarter and annual calculations.
+- Adds structural checks for period duration, YoY date alignment, filing chronology, form/accession availability, and non-calendar fiscal years.
+- Adds explicit PASS / REVIEW / FAIL extraction-integrity state.
+- Adds an explicit-action live validation suite covering AMZN, MSFT, NVDA, UBER, and JPM.
+- REVIEW is a valid result for an explainable sector/domain concept gap; the engine must not manufacture a value.
+- Fundamental score remains SHADOW MODE.
+- Frozen: Persistent Quality, Candidate Quality, Leadership, Entry Quality, anti-chase logic, candidate buckets, and trade decisions.
+
+
+### V1.2.2.2a — SEC Concept Continuity & Latest-Period Integrity
+- Status: **READY FOR LIVE ACCEPTANCE**
+- Trigger: UBER live validation exposed a 2019 revenue concept being selected while 2026 earnings facts were current.
+- Hard rule: a metric labelled Latest Quarter/FY may never fall back to an older reporting period.
+- Approved SEC revenue concepts are ranked by current-period coverage before declaration order.
+- Quarter and FY may use different approved SEC concepts when tagging transitions; this is displayed explicitly as SPLIT CURRENT SOURCES.
+- If no approved current concept exists, the metric is suppressed to N/A — CONCEPT REVIEW REQUIRED.
+- Future facts are excluded from latest-period reference selection.
+- Fundamental model remains SHADOW MODE; scanner classification logic remains frozen.
+
+### V1.2.2.2a1 — Annual Horizon & Filing-Form Integrity
+- Status: **READY FOR LIVE ACCEPTANCE**
+- Narrow hotfix following V1.2.2.2a cross-company validation.
+- Annual reference horizons now require annual SEC filing forms in addition to duration.
+- Later interim TTM/comparative facts cannot displace authoritative annual filing provenance.
+- UBER SEC concept-continuity/latest-period protection remains frozen and must not regress.
+- Live freeze target: AMZN/MSFT/NVDA/UBER PASS, JPM explainable REVIEW-or-better, FAIL 0.
+- Fundamental Quality remains SHADOW MODE; scanner classifications and trade decisions are unchanged.
