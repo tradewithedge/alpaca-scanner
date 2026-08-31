@@ -19,6 +19,7 @@ import scanner.indicators as indicators_module
 import scanner.inspector as inspector_module
 import scanner.fundamentals as fundamentals_module
 import scanner.fundamental_validation as fundamental_validation_module
+import scanner.fundamental_batch as fundamental_batch_module
 import scanner.leadership as leadership_module
 import scanner.regime as regime_module
 import scanner.scoring as scoring_module
@@ -31,6 +32,7 @@ for _module in (
     inspector_module,
     fundamentals_module,
     fundamental_validation_module,
+    fundamental_batch_module,
     leadership_module,
     regime_module,
     scoring_module,
@@ -77,6 +79,9 @@ DEFAULT_SEC_USER_AGENT = fundamentals_module.DEFAULT_SEC_USER_AGENT
 FUND_VALIDATION_CASES = fundamental_validation_module.VALIDATION_CASES
 fund_validation_row = fundamental_validation_module.validation_row
 summarize_fund_validation = fundamental_validation_module.summarize_validation_rows
+select_fundamental_batch_candidates = fundamental_batch_module.select_batch_candidates
+fundamental_batch_row = fundamental_batch_module.batch_row
+summarize_fundamental_batch = fundamental_batch_module.summarize_batch_rows
 add_leadership_features = leadership_module.add_leadership_features
 aggregate_regime = regime_module.aggregate_regime
 with_breadth = regime_module.with_breadth
@@ -90,7 +95,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.2.2a1"
+APP_VERSION = "V1.2.2.3"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -100,13 +105,13 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Fundamental Growth & Earnings Quality • Annual Horizon & Filing-Form Integrity"
+    "• Trade With Edge • Candidate Quality Engine • Fundamental Quality Engine • Universe Coverage & Cache Validation"
 )
 st.caption(
-    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.2.2a1 Annual Horizon "
-    "& Filing-Form Integrity • Official SEC CompanyFacts only • "
-    "Fundamental model remains SHADOW MODE • Frozen scanner classifications "
-    "remain unchanged"
+    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.2.3 Fundamental "
+    "Universe Coverage & Cache Validation • V1.2.2.2a1 extraction integrity "
+    "is frozen • Fundamentals remain SHADOW MODE and do not alter official "
+    "Candidate Quality, buckets, Entry Quality, or trade decisions"
 )
 
 
@@ -485,6 +490,178 @@ def render_fundamental_validation_suite():
         "PASS = usable SEC facts with structurally valid period pairing. "
         "REVIEW = explainable coverage/domain gap or lower confidence. "
         "FAIL = access failure or a suspicious period pair actually used by the engine."
+    )
+
+
+
+
+def render_fundamental_batch_coverage(scan, sample_size):
+    """V1.2.2.3 bounded fundamental batch coverage in SHADOW MODE."""
+    if scan is None:
+        st.info(
+            "Run Scanner first. Fundamental batch coverage only evaluates "
+            "persistent-quality symbols from a completed scanner result."
+        )
+        return
+
+    scored = scan.get("scored")
+    if scored is None or scored.empty:
+        st.info("No persistent-quality candidates are available for batch validation.")
+        return
+
+    selected = select_fundamental_batch_candidates(scored, sample_size)
+    if selected.empty:
+        st.info("No symbols were selected for fundamental batch validation.")
+        return
+
+    scan_ts = scan.get("ts")
+    scan_sig = (
+        scan.get("universe_name"),
+        scan_ts.isoformat() if hasattr(scan_ts, "isoformat") else str(scan_ts),
+        int(sample_size),
+        tuple(selected["symbol"].tolist()),
+    )
+
+    cached = st.session_state.get("fund_batch_result")
+    cached_sig = (
+        cached.get("signature")
+        if isinstance(cached, dict)
+        else None
+    )
+
+    if cached_sig != scan_sig:
+        progress = st.progress(
+            0.0,
+            text=(
+                f"Building bounded SEC fundamental reference for "
+                f"{len(selected):,} persistent-quality candidates..."
+            ),
+        )
+        rows = []
+        total = len(selected)
+
+        for i, (_, scanner_row) in enumerate(selected.iterrows(), start=1):
+            symbol = str(scanner_row["symbol"]).upper()
+            progress.progress(
+                i / total,
+                text=f"Loading official SEC fundamentals {i:,}/{total:,}: {symbol}",
+            )
+            try:
+                fund = load_fundamental_snapshot(symbol)
+            except Exception as exc:
+                fund = unavailable_fundamental_snapshot(
+                    symbol,
+                    f"Batch coverage load failed safely: {exc}",
+                    sec_access_status="FAILED",
+                    companyfacts_access_status="FAILED",
+                )
+
+            rows.append(
+                fundamental_batch_row(
+                    scanner_row.to_dict(),
+                    fund,
+                )
+            )
+
+        progress.empty()
+        summary = summarize_fundamental_batch(rows)
+        cached = {
+            "signature": scan_sig,
+            "rows": rows,
+            "summary": summary,
+            "universe_name": scan.get("universe_name"),
+            "sample_size": int(sample_size),
+            "built_at": datetime.now(timezone.utc),
+        }
+        st.session_state.fund_batch_result = cached
+
+    rows = cached.get("rows", [])
+    summary = cached.get("summary", {})
+    table = pd.DataFrame(rows)
+
+    st.subheader("3C) Fundamental Universe Coverage — Shadow Batch")
+    st.info(
+        "V1.2.2.3 SHADOW MODE: this is a bounded coverage/cache validation "
+        "over the highest official Candidate Quality names from the completed "
+        "scan. It does NOT alter official Candidate Quality, scanner ranking, "
+        "candidate buckets, Entry Quality, or trade decisions."
+    )
+    st.caption(
+        "Scope discipline: fundamentals are fetched only for already "
+        "persistent-quality candidates, never for the full raw U.S. universe. "
+        "Official SEC identity and CompanyFacts caches are reused."
+    )
+
+    b1, b2, b3, b4, b5, b6 = st.columns(6)
+    b1.metric("Sample requested", f"{summary.get('total', 0):,}")
+    b2.metric("CompanyFacts PASS", f"{summary.get('companyfacts_pass', 0):,}")
+    b3.metric("Integrity PASS", f"{summary.get('integrity_pass', 0):,}")
+    b4.metric("REVIEW", f"{summary.get('review', 0):,}")
+    b5.metric("FAIL", f"{summary.get('fail', 0):,}")
+    b6.metric(
+        "Usable coverage",
+        f"{summary.get('usable_coverage_pct', 0.0):.1f}%",
+    )
+
+    if summary.get("fail", 0):
+        st.error(
+            "Fundamental batch validation has one or more FAIL results. "
+            "Do not proceed to composite Candidate Quality integration."
+        )
+    elif summary.get("usable_coverage_pct", 0.0) < 90.0:
+        st.warning(
+            "No hard extraction FAIL was detected, but usable fundamental "
+            "coverage is below the 90% promotion threshold. Continue coverage "
+            "validation before composite integration."
+        )
+    else:
+        st.success(
+            "Bounded fundamental reference achieved ≥90% usable coverage with "
+            "no hard extraction FAIL. This is a prerequisite—not yet permission—"
+            "to change official Candidate Quality."
+        )
+
+    if summary.get("median_fundamental_score") is not None:
+        c1, c2, c3 = st.columns(3)
+        c1.metric(
+            "Median Fundamental Quality",
+            f"{summary['median_fundamental_score']:.1f}/100",
+        )
+        c2.metric(
+            "A / A+ fundamentals",
+            f"{summary.get('a_or_better', 0):,}",
+        )
+        c3.metric(
+            "Low/unknown data confidence",
+            f"{summary.get('low_unknown_confidence', 0):,}",
+        )
+
+    display_cols = [
+        "symbol",
+        "official_candidate_quality",
+        "leadership_score",
+        "fundamental_score",
+        "fundamental_grade",
+        "fundamental_confidence",
+        "metric_coverage_pct",
+        "metric_integrity",
+        "companyfacts",
+        "revenue_q_yoy",
+        "earnings_q_yoy_state",
+        "latest_filing",
+        "batch_status",
+        "interpretation",
+    ]
+    st.dataframe(
+        table[[c for c in display_cols if c in table.columns]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.caption(
+        "Selection order = official Candidate Quality descending, then "
+        "Leadership Score, then Legacy RS. Fundamental Quality is display-only "
+        "and cannot change this order in V1.2.2.3."
     )
 
 
@@ -1068,6 +1245,12 @@ if "fund_validation_requested" not in st.session_state:
     st.session_state.fund_validation_requested = False
 
 
+if "fund_batch_requested" not in st.session_state:
+    st.session_state.fund_batch_requested = False
+if "fund_batch_result" not in st.session_state:
+    st.session_state.fund_batch_result = None
+
+
 def _submit_inspector_callback():
     normalized = normalize_ticker(
         st.session_state.get("inspector_query_input", "")
@@ -1090,6 +1273,15 @@ def _run_fund_validation_callback():
 
 def _clear_fund_validation_callback():
     st.session_state.fund_validation_requested = False
+
+
+def _run_fund_batch_callback():
+    st.session_state.fund_batch_requested = True
+
+
+def _clear_fund_batch_callback():
+    st.session_state.fund_batch_requested = False
+    st.session_state.fund_batch_result = None
 
 
 with st.sidebar:
@@ -1205,6 +1397,34 @@ with st.sidebar:
         use_container_width=True,
         key="clear_fund_validation_button",
         on_click=_clear_fund_validation_callback,
+    )
+
+    st.divider()
+    st.subheader("📚 Fundamental Batch Coverage")
+    st.caption(
+        "V1.2.2.3 bounded SHADOW validation over persistent-quality candidates. "
+        "This does not change scanner ranking or buckets."
+    )
+    fund_batch_size = st.selectbox(
+        "Fundamental sample size",
+        [10, 25, 50],
+        index=1,
+        help=(
+            "Start with 25. The batch is selected from the completed scanner's "
+            "highest official Candidate Quality names and reuses SEC caches."
+        ),
+    )
+    st.button(
+        "Build fundamental sample",
+        use_container_width=True,
+        key="run_fund_batch_button",
+        on_click=_run_fund_batch_callback,
+    )
+    st.button(
+        "Clear fundamental sample",
+        use_container_width=True,
+        key="clear_fund_batch_button",
+        on_click=_clear_fund_batch_callback,
     )
 
 
@@ -1381,6 +1601,12 @@ def resolve_inspector_reference(
 
 
 if run:
+    # A new scanner run creates a new candidate population. Any previously
+    # built fundamental batch reference must not survive as if it belonged to
+    # the new scan.
+    st.session_state.fund_batch_requested = False
+    st.session_state.fund_batch_result = None
+
     progress = st.progress(0.03, text="Resolving selected universe...")
 
     try:
@@ -2231,6 +2457,13 @@ scored = res["scored"]
 liq = res["liquidity_audit"]
 bucket_audit = res["bucket_audit"]
 
+if st.session_state.fund_batch_requested:
+    render_fundamental_batch_coverage(
+        res,
+        fund_batch_size,
+    )
+    st.divider()
+
 
 # -----------------------------------------------------------------------------
 # 1) Scanner audit integrity
@@ -2440,10 +2673,11 @@ if not lead_valid.empty:
 
 st.markdown("### 3B) Fundamental Quality — Revenue & Earnings")
 st.info(
-    "V1.2.2.1b1 SHADOW MODE: fundamentals are loaded on demand for the selected "
-    "candidate or Ticker Inspector from official SEC EDGAR CompanyFacts. "
-    "This first validation build does not batch-fetch fundamentals for the "
-    "entire universe and does not alter scanner eligibility or ranking."
+    "V1.2.2.3 SHADOW MODE: single-ticker fundamentals remain available on "
+    "demand, while the optional Fundamental Batch Coverage lab can validate "
+    "a bounded sample of persistent-quality candidates. No fundamental score "
+    "changes official scanner eligibility, ranking, buckets, Entry Quality, "
+    "or trade decisions in this stage."
 )
 
 # -----------------------------------------------------------------------------
