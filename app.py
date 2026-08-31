@@ -99,7 +99,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.3"
+APP_VERSION = "V1.2.3a"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -109,13 +109,13 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Composite Quality Shadow Calibration"
+    "• Trade With Edge • Candidate Quality Engine • Composite Attribution & Incremental Fundamental Impact"
 )
 st.caption(
-    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.3 Composite Candidate "
-    "Quality Integration — Shadow Calibration • V1.2.2 Fundamental Quality "
-    "Engine is frozen • Official Candidate Quality, Entry Quality, buckets and "
-    "trade decisions remain unchanged"
+    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.3a Composite Attribution "
+    "& Incremental Fundamental Impact • V1.2.3 formulas remain unchanged • "
+    "Official Candidate Quality, Leadership definition, Entry Quality, buckets "
+    "and trade decisions remain frozen"
 )
 
 
@@ -585,10 +585,10 @@ def render_fundamental_batch_coverage(scan, sample_size):
 
     st.subheader("3C) Fundamental Universe Coverage — Shadow Batch")
     st.info(
-        "V1.2.2.3 SHADOW MODE: this is a bounded coverage/cache validation "
-        "over the highest official Candidate Quality names from the completed "
-        "scan. It does NOT alter official Candidate Quality, scanner ranking, "
-        "candidate buckets, Entry Quality, or trade decisions."
+        "V1.2.2.3 FROZEN FUNDAMENTAL REFERENCE: this bounded audited SEC sample "
+        "is the accepted input to V1.2.3a attribution analysis. It does NOT "
+        "alter official Candidate Quality, scanner ranking, candidate buckets, "
+        "Entry Quality, or trade decisions."
     )
     st.caption(
         "Scope discipline: fundamentals are fetched only for already "
@@ -675,29 +675,31 @@ def render_fundamental_batch_coverage(scan, sample_size):
 
 
 def render_shadow_composite_calibration(batch_table):
-    """V1.2.3 shadow-only composite calibration; never changes scanner state."""
+    """V1.2.3a shadow attribution; formulas unchanged, attribution improved."""
     if batch_table is None or batch_table.empty:
         st.info(
-            "Build a Fundamental Batch Coverage sample first. The composite "
-            "calibration uses that same audited sample and makes no new SEC calls."
+            "Build a Fundamental Batch Coverage sample first. Attribution uses "
+            "that same audited sample and makes no additional SEC calls."
         )
         return
 
     composite = build_shadow_composite_table(batch_table)
     summary = summarize_shadow_composite(composite)
 
-    st.subheader("3D) Composite Candidate Quality — Shadow Calibration")
+    st.subheader(
+        "3D) Composite Candidate Quality — Attribution & Shadow Calibration"
+    )
     st.info(
-        "V1.2.3 SHADOW MODE: Technical Candidate Quality, Leadership and "
-        "Fundamental Quality remain separately visible. The composite scores "
-        "below are calibration diagnostics only; they do NOT replace official "
-        "Candidate Quality, scanner ranking, buckets, Entry Quality, or trade decisions."
+        "V1.2.3a SHADOW MODE: the F10/F20/F30 formulas are unchanged. This patch "
+        "separates the effect of Leadership from the incremental effect of "
+        "Fundamental Quality. Official Candidate Quality, scanner ranking, "
+        "buckets, Entry Quality and trade decisions remain unchanged."
     )
     st.caption(
-        "Calibration family: No-Fund reference = 70% official Candidate Quality "
-        "+ 30% Leadership. Fundamental scenarios blend that reference with "
-        "10%, 20% or 30% Fundamental Quality. Missing/REVIEW fundamentals are "
-        "never imputed with a neutral value."
+        "Attribution chain: Official Candidate Quality → No-Fund Reference "
+        "(70% CQ + 30% Leadership) → F10/F20/F30. Positive rank impact means "
+        "promotion; negative means demotion. Fundamental impact is measured "
+        "from No-Fund, never directly from Official Candidate Quality."
     )
 
     w1, w2, w3, w4 = st.columns(4)
@@ -712,35 +714,55 @@ def render_shadow_composite_calibration(batch_table):
         f"{summary.get('rankable', 0)}/{summary.get('total', 0)}",
     )
     c2.metric(
-        "Top-10 overlap",
-        f"{summary.get('top10_overlap', 0)}/{summary.get('top_n', 0)}",
+        "Official→F20 Top-10",
+        f"{summary.get('official_f20_top10_overlap', 0)}/"
+        f"{summary.get('top_n', 0)}",
+    )
+    c3.metric(
+        "No-Fund→F20 Top-10",
+        f"{summary.get('nofund_f20_top10_overlap', 0)}/"
+        f"{summary.get('top_n', 0)}",
     )
 
-    corr = summary.get("spearman_corr")
-    c3.metric("Rank correlation", "—" if corr is None else f"{corr:.3f}")
+    lead_shift = summary.get("median_abs_leadership_rank_impact")
+    c4.metric(
+        "Median |Leadership rank impact|",
+        "—" if lead_shift is None else f"{lead_shift:.1f}",
+    )
 
-    shift = summary.get("median_abs_rank_shift")
-    c4.metric("Median |rank shift|", "—" if shift is None else f"{shift:.1f}")
-
-    impact = summary.get("mean_abs_f20_impact")
+    fund_shift = summary.get("median_abs_f20_fund_rank_impact")
     c5.metric(
-        "Mean |F20 impact|",
-        "—" if impact is None else f"{impact:.1f} pts",
+        "Median |F20 Fundamental rank impact|",
+        "—" if fund_shift is None else f"{fund_shift:.1f}",
     )
-    c6.metric("Full alignment", f"{summary.get('full_alignment', 0)}")
+
+    fund_score = summary.get("mean_abs_f20_fund_score_impact")
+    c6.metric(
+        "Mean |F20 Fundamental score impact|",
+        "—" if fund_score is None else f"{fund_score:.1f} pts",
+    )
 
     review_count = summary.get("unranked_fundamental_review", 0)
     if review_count:
         st.warning(
             f"{review_count} sampled candidate(s) are intentionally excluded "
-            "from full composite ranking because Fundamental Quality is REVIEW, "
-            "FAIL, or unavailable. No average/neutral value is substituted."
+            "from full composite attribution because Fundamental Quality is "
+            "REVIEW, FAIL, or unavailable. No neutral/average score is substituted."
         )
 
     if summary.get("rankable", 0):
         st.success(
-            "Shadow composite built successfully. Official scanner order remains "
-            "frozen; use rank shifts and scenario spread only for calibration."
+            "Attribution built successfully. Leadership and Fundamental effects "
+            "are now measured separately; official scanner order remains frozen."
+        )
+
+    st.markdown("**Scenario attribution summary — incremental Fundamental effect**")
+    scenario_summary = pd.DataFrame(summary.get("scenario_summary", []))
+    if not scenario_summary.empty:
+        st.dataframe(
+            scenario_summary,
+            use_container_width=True,
+            hide_index=True,
         )
 
     display_cols = [
@@ -749,15 +771,21 @@ def render_shadow_composite_calibration(batch_table):
         "leadership_score",
         "fundamental_score",
         "technical_leadership_reference",
+        "official_rank",
+        "no_fund_rank",
+        "leadership_rank_impact",
         "shadow_f10",
+        "f10_rank",
+        "f10_fund_rank_impact",
         "shadow_f20",
         "shadow_f20_grade",
+        "f20_rank",
+        "f20_fund_rank_impact",
         "shadow_f30",
-        "f20_impact_pts",
-        "official_rank",
-        "shadow_f20_rank",
-        "rank_change",
-        "scenario_spread_pts",
+        "f30_rank",
+        "f30_fund_rank_impact",
+        "f20_fund_score_impact_pts",
+        "net_f20_rank_change",
         "quality_profile",
         "fundamental_confidence",
         "batch_status",
@@ -783,9 +811,9 @@ def render_shadow_composite_calibration(batch_table):
     )
 
     st.caption(
-        "Rank change: positive = promoted by F20 versus official Candidate Quality "
-        "within the same rankable sample; negative = demoted. Quality profile is "
-        "descriptive only, never a scanner gate."
+        "Leadership rank impact = Official CQ rank → No-Fund rank. "
+        "F20 Fundamental rank impact = No-Fund rank → F20 rank. "
+        "Net F20 rank change = Official CQ rank → F20 rank."
     )
 
     rankable = composite[
@@ -793,19 +821,25 @@ def render_shadow_composite_calibration(batch_table):
     ].copy()
 
     if not rankable.empty:
-        movers = rankable.sort_values("rank_change", ascending=False)
-        left, right = st.columns(2)
+        fund_movers = rankable.sort_values(
+            "f20_fund_rank_impact",
+            ascending=False,
+        )
 
+        left, right = st.columns(2)
         with left:
-            st.markdown("**Largest F20 promotions**")
+            st.markdown("**Largest FUNDAMENTAL promotions — F20 vs No-Fund**")
             st.dataframe(
-                movers.head(5)[
+                fund_movers.head(5)[
                     [
                         "symbol",
                         "official_candidate_quality",
+                        "leadership_score",
                         "fundamental_score",
-                        "shadow_f20",
-                        "rank_change",
+                        "no_fund_rank",
+                        "f20_rank",
+                        "f20_fund_rank_impact",
+                        "f20_fund_score_impact_pts",
                         "quality_profile",
                     ]
                 ],
@@ -814,15 +848,19 @@ def render_shadow_composite_calibration(batch_table):
             )
 
         with right:
-            st.markdown("**Largest F20 demotions**")
+            st.markdown("**Largest FUNDAMENTAL demotions — F20 vs No-Fund**")
             st.dataframe(
-                movers.tail(5).sort_values("rank_change")[
+                fund_movers.tail(5)
+                .sort_values("f20_fund_rank_impact")[
                     [
                         "symbol",
                         "official_candidate_quality",
+                        "leadership_score",
                         "fundamental_score",
-                        "shadow_f20",
-                        "rank_change",
+                        "no_fund_rank",
+                        "f20_rank",
+                        "f20_fund_rank_impact",
+                        "f20_fund_score_impact_pts",
                         "quality_profile",
                     ]
                 ],
@@ -830,11 +868,53 @@ def render_shadow_composite_calibration(batch_table):
                 hide_index=True,
             )
 
-    st.caption(
-        "Calibration discipline: no permanent fundamental weight will be chosen "
-        "from one scan. Compare representative S&P 500 and Russell 2000 results first."
-    )
+        leadership_movers = rankable.sort_values(
+            "leadership_rank_impact",
+            ascending=False,
+        )
 
+        st.markdown("**Leadership attribution — Official CQ vs No-Fund**")
+        left2, right2 = st.columns(2)
+
+        with left2:
+            st.markdown("**Largest Leadership promotions**")
+            st.dataframe(
+                leadership_movers.head(5)[
+                    [
+                        "symbol",
+                        "official_candidate_quality",
+                        "leadership_score",
+                        "official_rank",
+                        "no_fund_rank",
+                        "leadership_rank_impact",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        with right2:
+            st.markdown("**Largest Leadership demotions**")
+            st.dataframe(
+                leadership_movers.tail(5)
+                .sort_values("leadership_rank_impact")[
+                    [
+                        "symbol",
+                        "official_candidate_quality",
+                        "leadership_score",
+                        "official_rank",
+                        "no_fund_rank",
+                        "leadership_rank_impact",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    st.caption(
+        "Calibration discipline: V1.2.3a changes attribution only. F10/F20/F30 "
+        "weights are unchanged, and no permanent production weight is selected yet."
+    )
 
 
 def _symbol_key(symbol):
@@ -2844,11 +2924,10 @@ if not lead_valid.empty:
 
 st.markdown("### 3B) Fundamental Quality — Revenue & Earnings")
 st.info(
-    "V1.2.2.3 SHADOW MODE: single-ticker fundamentals remain available on "
-    "demand, while the optional Fundamental Batch Coverage lab can validate "
-    "a bounded sample of persistent-quality candidates. No fundamental score "
-    "changes official scanner eligibility, ranking, buckets, Entry Quality, "
-    "or trade decisions in this stage."
+    "V1.2.3a ATTRIBUTION MODE: single-ticker Fundamental Quality remains "
+    "independently visible. The frozen bounded batch supplies the audited "
+    "cross-sectional input for composite attribution; official scanner "
+    "eligibility, ranking, buckets, Entry Quality and trade decisions remain frozen."
 )
 
 # -----------------------------------------------------------------------------
