@@ -34,7 +34,8 @@ When proposing a feature, first ask: **Which roadmap stage does this belong to?*
 | V1.2.2.2a–V1.2.2.2a1 | Concept continuity + annual horizon integrity | Complete / Frozen |
 | V1.2.2.1 | Revenue & Earnings Growth — shadow validation | Complete / superseded |
 | V1.2.2.1a–V1.2.2.1b1 | SEC access / identity / Fair Access integrity | Complete / Frozen |
-| V1.2.3 | Composite Candidate Quality Integration — Shadow Calibration | **CURRENT** |
+| V1.2.3 | Composite Candidate Quality Integration — Shadow Calibration | Calibration captured / not frozen |
+| V1.2.3a | Composite Attribution & Incremental Fundamental Impact | **CURRENT / READY FOR LIVE ACCEPTANCE** |
 | V1.3 | Entry Quality / Anti-Chase Engine | Planned |
 | V1.4 | Market Regime & Deployment Engine | Planned |
 | V1.5 | Earnings / Event Reliability Layer | Planned |
@@ -43,7 +44,7 @@ When proposing a feature, first ask: **Which roadmap stage does this belong to?*
 | V1.8 | Paper Trading & Trade Journal Integration | Planned |
 | V2.0 | Production-grade Daily Swing Scanner | Target |
 
-## Current Stage — V1.2.3 Composite Candidate Quality Integration — Shadow Calibration
+## Current Stage — V1.2.3a Composite Attribution & Incremental Fundamental Impact
 
 ### Objective
 
@@ -163,3 +164,23 @@ The progress percentages describe implementation maturity, not expected trading 
   Entry Quality, anti-chase rules, buckets, event-gate behavior and trade decisions.
 - Promotion requires multi-universe live calibration and an explicit
   weighting/gating decision. No automatic promotion is permitted.
+
+
+### V1.2.3a — Composite Attribution & Incremental Fundamental Impact
+- Status: **READY FOR LIVE ACCEPTANCE**
+- Narrow attribution refinement; V1.2.3 F10/F20/F30 formulas are unchanged.
+- Separates Leadership impact from incremental Fundamental impact.
+- Leadership rank impact = Official Candidate Quality rank → No-Fund rank.
+- F10/F20/F30 Fundamental rank impact = No-Fund rank → scenario rank.
+- Net F20 rank change = Official Candidate Quality rank → F20 rank.
+- Fundamental mover panels use F20 versus No-Fund, not F20 versus Official CQ.
+- Separate Leadership promotion/demotion panels are displayed.
+- Scenario attribution summary reports No-Fund Top-10 overlap, Spearman
+  correlation, median absolute Fundamental rank impact and mean Fundamental
+  score impact for F10/F20/F30.
+- REVIEW/FAIL/unavailable Fundamental Quality is never imputed.
+- Frozen throughout: official Candidate Quality, Leadership definition,
+  Fundamental Quality engine, Entry Quality, anti-chase rules, candidate
+  buckets, event-gate behavior and trade decisions.
+- No permanent production weighting may be selected until V1.2.3a is
+  validated on both S&P 500 and Russell 2000.
