@@ -21,6 +21,7 @@ import scanner.fundamentals as fundamentals_module
 import scanner.fundamental_validation as fundamental_validation_module
 import scanner.fundamental_batch as fundamental_batch_module
 import scanner.composite_quality as composite_quality_module
+import scanner.composite_robustness as composite_robustness_module
 import scanner.leadership as leadership_module
 import scanner.regime as regime_module
 import scanner.scoring as scoring_module
@@ -35,6 +36,7 @@ for _module in (
     fundamental_validation_module,
     fundamental_batch_module,
     composite_quality_module,
+    composite_robustness_module,
     leadership_module,
     regime_module,
     scoring_module,
@@ -86,6 +88,8 @@ fundamental_batch_row = fundamental_batch_module.batch_row
 summarize_fundamental_batch = fundamental_batch_module.summarize_batch_rows
 build_shadow_composite_table = composite_quality_module.build_shadow_composite_table
 summarize_shadow_composite = composite_quality_module.summarize_shadow_composite
+build_composite_robustness_table = composite_robustness_module.build_composite_robustness_table
+summarize_composite_robustness = composite_robustness_module.summarize_composite_robustness
 add_leadership_features = leadership_module.add_leadership_features
 aggregate_regime = regime_module.aggregate_regime
 with_breadth = regime_module.with_breadth
@@ -99,7 +103,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.3a"
+APP_VERSION = "V1.2.3b"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -109,13 +113,13 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Composite Attribution & Incremental Fundamental Impact"
+    "• Trade With Edge • Candidate Quality Engine • Composite Weight Robustness & Guardrail Calibration"
 )
 st.caption(
-    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.3a Composite Attribution "
-    "& Incremental Fundamental Impact • V1.2.3 formulas remain unchanged • "
-    "Official Candidate Quality, Leadership definition, Entry Quality, buckets "
-    "and trade decisions remain frozen"
+    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.3b Composite Weight "
+    "Robustness & Guardrail Calibration • V1.2.3a attribution is accepted/frozen • "
+    "Candidate Quality, Leadership, Fundamental Quality and Entry Quality remain "
+    "separate; official ranking, buckets and trade decisions remain unchanged"
 )
 
 
@@ -586,9 +590,9 @@ def render_fundamental_batch_coverage(scan, sample_size):
     st.subheader("3C) Fundamental Universe Coverage — Shadow Batch")
     st.info(
         "V1.2.2.3 FROZEN FUNDAMENTAL REFERENCE: this bounded audited SEC sample "
-        "is the accepted input to V1.2.3a attribution analysis. It does NOT "
-        "alter official Candidate Quality, scanner ranking, candidate buckets, "
-        "Entry Quality, or trade decisions."
+        "is the accepted input to V1.2.3b robustness calibration. It does NOT "
+        "alter Candidate Quality, Leadership, Fundamental Quality, scanner "
+        "ranking, candidate buckets, Entry Quality, or trade decisions."
     )
     st.caption(
         "Scope discipline: fundamentals are fetched only for already "
@@ -665,11 +669,14 @@ def render_fundamental_batch_coverage(scan, sample_size):
     st.caption(
         "Selection order = official Candidate Quality descending, then "
         "Leadership Score, then Legacy RS. This frozen V1.2.2.3 sample is the "
-        "audited input to V1.2.3 shadow calibration; official scanner order remains unchanged."
+        "audited input to V1.2.3b robustness calibration; official scanner order remains unchanged."
     )
 
     st.divider()
     render_shadow_composite_calibration(table)
+
+    st.divider()
+    render_composite_robustness_calibration(table)
 
 
 
@@ -914,6 +921,223 @@ def render_shadow_composite_calibration(batch_table):
     st.caption(
         "Calibration discipline: V1.2.3a changes attribution only. F10/F20/F30 "
         "weights are unchanged, and no permanent production weight is selected yet."
+    )
+
+
+def render_composite_robustness_calibration(batch_table):
+    """V1.2.3b weight-robustness and guardrail simulation; shadow only."""
+    if batch_table is None or batch_table.empty:
+        return
+
+    robust = build_composite_robustness_table(batch_table)
+    summary = summarize_composite_robustness(robust)
+
+    st.subheader("3E) Composite Weight Robustness & Guardrail Calibration")
+    st.info(
+        "V1.2.3b SHADOW MODE: this section does NOT change any official score or "
+        "ranking. It stress-tests Fundamental weight from 5% to 30% and simulates "
+        "F20 impact caps of ±4, ±6 and ±8 points. Guardrails are calibration "
+        "candidates only — none is enforced."
+    )
+
+    sample_total = summary.get("total", 0)
+    if sample_total < 40:
+        st.warning(
+            f"Current sample is {sample_total}. V1.2.3b live acceptance should use "
+            "a 50-name Fundamental Batch sample so robustness is not judged from "
+            "the earlier 25-name calibration alone."
+        )
+
+    st.caption(
+        "Weight formula preserves the frozen CQ:Leadership relationship: "
+        "Composite(w) = (1−w) × No-Fund Reference + w × Fundamental Quality. "
+        "Therefore F10/F20/F30 exactly match the accepted V1.2.3a formulas; "
+        "F05/F15/F25 are interpolation points only."
+    )
+
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1.metric(
+        "Rankable",
+        f"{summary.get('rankable', 0)}/{summary.get('total', 0)}",
+    )
+    m2.metric(
+        "Stable Top-10 F10→F30",
+        f"{summary.get('stable_top10_all_weights', 0)}/10",
+    )
+    m3.metric(
+        "Stable center Top-10 F15/F20/F25",
+        f"{summary.get('stable_top10_center_weights', 0)}/10",
+    )
+    med_range = summary.get("median_rank_range")
+    m4.metric(
+        "Median rank range",
+        "—" if med_range is None else f"{med_range:.1f}",
+    )
+    m5.metric(
+        "High-sensitivity names",
+        f"{summary.get('high_sensitivity_count', 0)}",
+        help="Rank range ≥5 places across the 5%–30% Fundamental weight grid.",
+    )
+    m6.metric(
+        "F20 ±6pt triggers",
+        f"{summary.get('cap6_trigger_count', 0)}",
+        help="Names whose raw F20 Fundamental score impact exceeds ±6 points.",
+    )
+
+    st.markdown("**Weight robustness grid**")
+    weight_summary = pd.DataFrame(summary.get("weight_summary", []))
+    if not weight_summary.empty:
+        st.dataframe(
+            weight_summary,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.markdown("**Top-10 persistence and rank sensitivity**")
+    sensitivity_cols = [
+        "symbol",
+        "official_candidate_quality",
+        "leadership_score",
+        "fundamental_score",
+        "quality_profile",
+        "rank_f10",
+        "rank_f15",
+        "rank_f20",
+        "rank_f25",
+        "rank_f30",
+        "rank_range_f10_f30",
+        "top10_weight_count",
+        "center_top10_count",
+        "f20_fund_score_impact_pts",
+    ]
+    sensitivity = robust.copy()
+    sensitivity["_sort"] = pd.to_numeric(
+        sensitivity.get("rank_range_f10_f30"),
+        errors="coerce",
+    )
+    sensitivity = sensitivity.sort_values(
+        ["_sort", "official_candidate_quality"],
+        ascending=[False, False],
+        na_position="last",
+    ).drop(columns="_sort")
+    st.dataframe(
+        sensitivity[
+            [c for c in sensitivity_cols if c in sensitivity.columns]
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.caption(
+        "rank_range_f10_f30 = best-to-worst rank spread across F10, F15, F20, "
+        "F25 and F30. A large range means the stock is highly sensitive to the "
+        "chosen Fundamental weight. This is a calibration diagnostic, not a penalty."
+    )
+
+    st.markdown("**F20 guardrail simulation — impact cap comparison**")
+    guard_summary = pd.DataFrame(summary.get("guardrail_summary", []))
+    if not guard_summary.empty:
+        st.dataframe(
+            guard_summary,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.caption(
+        "A ±N-point guardrail caps only the incremental Fundamental contribution "
+        "around the No-Fund Reference. It does not alter Candidate Quality, "
+        "Leadership or Fundamental Quality themselves. Raw F20 remains the primary "
+        "uncapped calibration reference."
+    )
+
+    cap6 = robust[
+        pd.to_numeric(
+            robust.get("cap6_triggered"),
+            errors="coerce",
+        ).fillna(0).astype(bool)
+    ].copy()
+
+    if cap6.empty:
+        st.success(
+            "No rankable candidate exceeds the ±6-point F20 Fundamental-impact "
+            "threshold in this sample."
+        )
+    else:
+        st.markdown("**Candidates affected by the ±6pt guardrail simulation**")
+        cap6["_abs_raw"] = pd.to_numeric(
+            cap6["f20_fund_score_impact_pts"],
+            errors="coerce",
+        ).abs()
+        cap6 = cap6.sort_values("_abs_raw", ascending=False).drop(
+            columns="_abs_raw"
+        )
+        st.dataframe(
+            cap6[
+                [
+                    c
+                    for c in [
+                        "symbol",
+                        "official_candidate_quality",
+                        "leadership_score",
+                        "fundamental_score",
+                        "quality_profile",
+                        "technical_leadership_reference",
+                        "shadow_f20",
+                        "f20_fund_score_impact_pts",
+                        "guard_f20_cap6",
+                        "rank_f20",
+                        "guard_rank_cap6",
+                        "guard_rank_change_cap6_vs_raw",
+                        "cap6_direction",
+                    ]
+                    if c in cap6.columns
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    tech_weak = robust[
+        robust.get("quality_profile", pd.Series(dtype=str)).astype(str)
+        == "TECHNICAL-LED / WEAK FUNDAMENTALS"
+    ].copy()
+
+    if not tech_weak.empty:
+        st.markdown("**Technical-led / weak-fundamental preservation watch**")
+        st.dataframe(
+            tech_weak[
+                [
+                    c
+                    for c in [
+                        "symbol",
+                        "official_candidate_quality",
+                        "leadership_score",
+                        "fundamental_score",
+                        "technical_leadership_reference",
+                        "shadow_f20",
+                        "f20_fund_score_impact_pts",
+                        "rank_f20",
+                        "rank_range_f10_f30",
+                        "cap6_triggered",
+                        "guard_rank_cap6",
+                    ]
+                    if c in tech_weak.columns
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(
+            "This watchlist does NOT rescue or block these stocks. It tells us "
+            "whether a continuous Fundamental weight is excessively suppressing "
+            "technically/leadership-strong candidates — exactly the architecture "
+            "risk V1.2.3b is intended to measure."
+        )
+
+    st.caption(
+        "V1.2.3b freeze discipline: choose neither a production Fundamental "
+        "weight nor a guardrail from one universe. Compare S&P 500 and Russell "
+        "2000 with 50-name samples first."
     )
 
 
@@ -1661,8 +1885,9 @@ with st.sidebar:
         [10, 25, 50],
         index=1,
         help=(
-            "Start with 25. The batch is selected from the completed scanner's "
-            "highest official Candidate Quality names and reuses SEC caches."
+            "Use 50 for V1.2.3b robustness acceptance. The batch is selected from "
+            "the completed scanner's highest official Candidate Quality names "
+            "and reuses SEC caches. Smaller samples remain available for diagnostics."
         ),
     )
     st.button(

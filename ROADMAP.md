@@ -35,7 +35,8 @@ When proposing a feature, first ask: **Which roadmap stage does this belong to?*
 | V1.2.2.1 | Revenue & Earnings Growth — shadow validation | Complete / superseded |
 | V1.2.2.1a–V1.2.2.1b1 | SEC access / identity / Fair Access integrity | Complete / Frozen |
 | V1.2.3 | Composite Candidate Quality Integration — Shadow Calibration | Calibration captured / not frozen |
-| V1.2.3a | Composite Attribution & Incremental Fundamental Impact | **CURRENT / READY FOR LIVE ACCEPTANCE** |
+| V1.2.3a | Composite Attribution & Incremental Fundamental Impact | Accepted / Frozen |
+| V1.2.3b | Composite Weight Robustness & Guardrail Calibration | **CURRENT / READY FOR LIVE ACCEPTANCE** |
 | V1.3 | Entry Quality / Anti-Chase Engine | Planned |
 | V1.4 | Market Regime & Deployment Engine | Planned |
 | V1.5 | Earnings / Event Reliability Layer | Planned |
@@ -44,7 +45,7 @@ When proposing a feature, first ask: **Which roadmap stage does this belong to?*
 | V1.8 | Paper Trading & Trade Journal Integration | Planned |
 | V2.0 | Production-grade Daily Swing Scanner | Target |
 
-## Current Stage — V1.2.3a Composite Attribution & Incremental Fundamental Impact
+## Current Stage — V1.2.3b Composite Weight Robustness & Guardrail Calibration
 
 ### Objective
 
@@ -184,3 +185,37 @@ The progress percentages describe implementation maturity, not expected trading 
   buckets, event-gate behavior and trade decisions.
 - No permanent production weighting may be selected until V1.2.3a is
   validated on both S&P 500 and Russell 2000.
+
+
+### V1.2.3b — Composite Weight Robustness & Guardrail Calibration
+- Status: **READY FOR LIVE ACCEPTANCE**
+- V1.2.3a attribution is accepted/frozen and remains the authority for separating
+  Leadership impact from incremental Fundamental impact.
+- This stage does **not** merge or overwrite Candidate Quality, Leadership,
+  Fundamental Quality or Entry Quality.
+- Weight-robustness family:
+  - F05, F10, F15, F20, F25, F30.
+  - Formula: `(1-w) × No-Fund Reference + w × Fundamental Quality`.
+  - F10/F20/F30 must exactly match the accepted V1.2.3a formulas.
+- Robustness diagnostics:
+  - Top-10 overlap vs No-Fund by weight.
+  - Spearman rank correlation vs No-Fund by weight.
+  - Median Fundamental rank impact.
+  - Mean / maximum Fundamental score impact.
+  - Per-stock rank range from F10 through F30.
+  - Stable Top-10 membership across the full and center weight bands.
+- Guardrail calibration is simulation only:
+  - raw F20 remains the uncapped reference.
+  - compare symmetric incremental Fundamental-impact caps at ±4, ±6 and ±8
+    composite-score points.
+  - measure trigger counts, direction, Top-10 overlap vs raw F20, Spearman vs
+    raw F20, and rank changes.
+- Explicitly watch TECHNICAL-LED / WEAK FUNDAMENTALS names to ensure a continuous
+  Fundamental weight does not mechanically erase a legitimate technical edge.
+- REVIEW/FAIL/unavailable Fundamental Quality is never imputed.
+- Live acceptance uses **50-name samples** on both S&P 500 and Russell 2000.
+- Frozen throughout: official Candidate Quality, Leadership definition,
+  Fundamental Quality engine, Entry Quality, anti-chase rules, buckets,
+  event-gate behavior and trade decisions.
+- No production Composite Quality weight or guardrail is selected until both
+  50-name universe tests are reviewed.
