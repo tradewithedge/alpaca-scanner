@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 
 
-VALIDATION_VERSION = "V1.2.2.2a"
+VALIDATION_VERSION = "V1.2.2.2a1"
 
 # Deliberately different reporting profiles. These are not "best stocks";
 # they are structural test cases for the extraction engine.

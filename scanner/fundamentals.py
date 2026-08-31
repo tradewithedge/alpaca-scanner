@@ -11,7 +11,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 
-FUNDAMENTALS_VERSION = "V1.2.2.2a"
+FUNDAMENTALS_VERSION = "V1.2.2.2a1"
 
 SEC_TICKER_JSON_URL = "https://www.sec.gov/files/company_tickers.json"
 SEC_TICKER_TEXT_URL = "https://www.sec.gov/include/ticker.txt"
@@ -41,7 +41,7 @@ SEC_IDENTITY_MIRROR_LABEL = "SEC-derived pinned GitHub identity mirror"
 # contact email. We intentionally do NOT fabricate a user's contact email.
 DEFAULT_SEC_USER_AGENT = ""
 
-SEC_APPLICATION_NAME = "TradeWithEdge AlpacaScanner/1.2.2.2a"
+SEC_APPLICATION_NAME = "TradeWithEdge AlpacaScanner/1.2.2.2a1"
 SEC_EMAIL_RE = re.compile(
     r"([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})",
     re.IGNORECASE,
@@ -52,6 +52,23 @@ SEC_RETRYABLE_STATUS = (429, 500, 502, 503, 504)
 ALLOWED_FORMS = {
     "10-Q", "10-Q/A", "10-K", "10-K/A",
     "20-F", "20-F/A", "40-F", "40-F/A",
+    "6-K", "6-K/A",
+}
+
+# V1.2.2.2a1 — Annual Horizon & Filing-Form Integrity
+#
+# A duration near one year is not enough to establish an issuer's official
+# fiscal-year horizon. Interim filings can carry trailing-12-month or
+# comparative duration facts. Only annual filing forms may establish the
+# official annual reference used by Fundamental Quality.
+ANNUAL_FORMS = {
+    "10-K", "10-K/A",
+    "20-F", "20-F/A",
+    "40-F", "40-F/A",
+}
+
+INTERIM_FORMS = {
+    "10-Q", "10-Q/A",
     "6-K", "6-K/A",
 }
 
@@ -108,7 +125,7 @@ def build_sec_declared_user_agent(
         org = str(organization or "TradeWithEdge").strip() or "TradeWithEdge"
         return {
             "ready": True,
-            "user_agent": f"{org} AlpacaScanner/1.2.2.2a {email}",
+            "user_agent": f"{org} AlpacaScanner/1.2.2.2a1 {email}",
             "contact_email": email,
             "source": "SEC_CONTACT_EMAIL",
             "reason": "",
@@ -848,13 +865,41 @@ def _concept_observations(
     if df.empty:
         return df, selected_unit
 
-    # Restatements/amendments may repeat a period. Prefer the most recently
-    # filed value for an identical start/end period.
+    # Restatements/amendments and later interim filings may repeat an
+    # identical start/end period. V1.2.2.2a1 makes deduplication filing-form
+    # aware before quarter/annual classification:
+    #
+    # - annual-duration facts prefer an annual filing (10-K/20-F/40-F)
+    # - quarter-duration facts prefer an interim filing when available
+    # - within the same authority class, the most recently filed fact wins
+    #
+    # This prevents a later 10-Q carrying a year-long comparative/TTM fact
+    # from replacing the authoritative 10-K observation.
+    def _authority_rank(row):
+        form = str(row.get("form") or "")
+        duration = int(row.get("duration_days") or 0)
+
+        if 300 <= duration <= 430:
+            return 0 if form in ANNUAL_FORMS else 10
+
+        if 60 <= duration <= 120:
+            if form in INTERIM_FORMS:
+                return 0
+            if form in ANNUAL_FORMS:
+                # Keep support for a genuine Q4 fact disclosed only in a 10-K.
+                return 1
+
+        return 5
+
+    df["_authority_rank"] = df.apply(_authority_rank, axis=1)
     df["_filed_sort"] = pd.to_datetime(df["filed"], errors="coerce")
     df = (
-        df.sort_values(["start", "end", "_filed_sort"])
-        .drop_duplicates(["start", "end"], keep="last")
-        .drop(columns="_filed_sort")
+        df.sort_values(
+            ["start", "end", "_authority_rank", "_filed_sort"],
+            ascending=[True, True, True, False],
+        )
+        .drop_duplicates(["start", "end"], keep="first")
+        .drop(columns=["_authority_rank", "_filed_sort"])
         .reset_index(drop=True)
     )
     return df, selected_unit
@@ -1054,7 +1099,7 @@ def _resolve_metric_domain(
 ) -> dict:
     """Resolve current quarter and annual concepts independently but explicitly.
 
-    This is the V1.2.2.2a concept-continuity engine. It permits a documented
+    This is the V1.2.2.2a1 concept-continuity + annual-horizon engine. It permits a documented
     concept transition/split source when SEC tagging changes, but blocks stale
     observations from being presented as a current metric.
     """
@@ -1182,7 +1227,16 @@ def _period_series(observations: pd.DataFrame, period: str) -> pd.DataFrame:
     if period == "quarter":
         df = df[(df["duration_days"] >= 60) & (df["duration_days"] <= 120)]
     elif period == "annual":
-        df = df[(df["duration_days"] >= 300) & (df["duration_days"] <= 430)]
+        # V1.2.2.2a1 hard gate:
+        # duration alone cannot define an annual fiscal-year horizon.
+        # A 300–430 day fact must also originate from an annual filing.
+        # This blocks interim TTM/comparative facts from falsely advancing
+        # company_annual_reference_end beyond the latest true FY filing.
+        df = df[
+            (df["duration_days"] >= 300)
+            & (df["duration_days"] <= 430)
+            & (df["form"].isin(ANNUAL_FORMS))
+        ]
     else:
         raise ValueError("period must be 'quarter' or 'annual'")
 
@@ -1706,7 +1760,7 @@ def build_fundamental_snapshot(
 ) -> dict:
     """Build explainable SEC fundamentals with concept/latest-period integrity.
 
-    V1.2.2.2a remains SHADOW MODE. It may diagnose or suppress an unsafe
+    V1.2.2.2a1 remains SHADOW MODE. It may diagnose or suppress an unsafe
     fundamental metric, but it never alters scanner eligibility/buckets/trades.
     """
     ticker = normalize_sec_ticker(ticker)
