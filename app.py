@@ -90,7 +90,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.2.2"
+APP_VERSION = "V1.2.2.2a"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -100,13 +100,13 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Fundamental Growth & Earnings Quality • Metric Integrity & Cross-Company Validation"
+    "• Trade With Edge • Candidate Quality Engine • Fundamental Growth & Earnings Quality • SEC Concept Continuity & Latest-Period Integrity"
 )
 st.caption(
-    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.2.2 Fundamental "
-    "Metric Integrity & Cross-Company Validation • Official SEC CompanyFacts "
-    "only • Fundamental model remains SHADOW MODE • Frozen scanner "
-    "classifications remain unchanged"
+    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.2.2a SEC Concept "
+    "Continuity & Latest-Period Integrity • Official SEC CompanyFacts only • "
+    "Fundamental model remains SHADOW MODE • Frozen scanner classifications "
+    "remain unchanged"
 )
 
 
@@ -413,7 +413,7 @@ def load_validation_fundamental_snapshot(symbol, identity, declared):
 def render_fundamental_validation_suite():
     """Explicit-action V1.2.2.2 live SEC cross-company validation utility."""
     st.subheader(
-        "🧪 V1.2.2.2 Fundamental Metric Integrity & Cross-Company Validation"
+        "🧪 V1.2.2.2a SEC Concept Continuity & Latest-Period Integrity"
     )
     st.caption(
         "READ-ONLY VALIDATION LAB: this suite does not alter Persistent Quality, "
@@ -465,10 +465,10 @@ def render_fundamental_validation_suite():
         )
     elif summary["review"]:
         st.warning(
-            "No extraction FAIL was detected, but at least one reporting/domain "
-            "profile requires REVIEW. This is an expected outcome if a sector "
-            "needs a specialized SEC concept map; the engine must remain explicit "
-            "rather than fabricate missing fundamentals."
+            "No extraction FAIL was detected, but at least one profile requires "
+            "REVIEW. In V1.2.2.2a a REVIEW is acceptable only when any stale or "
+            "unresolved concept is BLOCKED from the current metric (N/A), never "
+            "silently substituted with an older period."
         )
     else:
         st.success(
@@ -647,12 +647,12 @@ def _fund_pp(value):
 
 
 def render_fundamental_quality(symbol, *, expanded=True, key_prefix="fund"):
-    """Render V1.2.2.2 fundamentals in read-only SHADOW MODE."""
+    """Render V1.2.2.2a fundamentals in read-only SHADOW MODE."""
     with st.spinner(f"Loading official SEC fundamentals for {symbol}..."):
         fund = load_fundamental_snapshot(symbol)
 
     with st.expander(
-        "V1.2.2.2 Fundamental Growth & Earnings Quality — Metric Integrity View",
+        "V1.2.2.2a Fundamental Growth & Earnings Quality — Concept Integrity View",
         expanded=expanded,
     ):
         st.caption(
@@ -751,9 +751,75 @@ def render_fundamental_quality(symbol, *, expanded=True, key_prefix="fund"):
             )
 
 
+        st.markdown("#### SEC Concept Continuity & Latest-Period Integrity")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric(
+            "Revenue quarter concept",
+            fund.get("revenue_quarter_concept") or "REVIEW REQUIRED",
+        )
+        c2.metric(
+            "Revenue FY concept",
+            fund.get("revenue_annual_concept") or "REVIEW REQUIRED",
+        )
+        c3.metric(
+            "Concept continuity",
+            fund.get("revenue_concept_continuity") or "UNKNOWN",
+        )
+        c4.metric(
+            "Revenue latest-period",
+            fund.get("revenue_quarter_latest_period_status") or "UNKNOWN",
+        )
+
+        d1, d2, d3, d4 = st.columns(4)
+        d1.metric(
+            "Revenue Q period",
+            str(fund.get("revenue_q_end") or "—"),
+        )
+        d2.metric(
+            "Issuer latest Q reference",
+            str(fund.get("company_quarter_reference_end") or "—"),
+        )
+        qlag = fund.get("revenue_quarter_company_lag_days")
+        d3.metric(
+            "Revenue Q lag",
+            f"{int(qlag)} days" if qlag is not None else "—",
+        )
+        d4.metric(
+            "Revenue FY latest-period",
+            fund.get("revenue_annual_latest_period_status") or "UNKNOWN",
+        )
+
+        concept_notes = fund.get("revenue_concept_notes") or []
+        if fund.get("revenue_quarter_latest_period_status") == "REVIEW":
+            st.warning(
+                "Current-quarter revenue is blocked until a current approved "
+                "SEC concept is established. No older quarter may substitute. "
+                + (" | ".join(concept_notes) if concept_notes else "")
+            )
+        elif fund.get("revenue_concept_continuity") == "SPLIT CURRENT SOURCES":
+            st.info(
+                "SEC concept transition detected and resolved: quarter and FY "
+                "use different approved current concepts. Exact provenance is "
+                "shown in the Metric Integrity Audit below."
+            )
+        elif fund.get("revenue_quarter_latest_period_status") == "PASS":
+            st.success(
+                "Revenue latest-period gate PASS — the displayed current-quarter "
+                "metric comes from the issuer's current reporting horizon."
+            )
+
         st.markdown("#### Revenue growth")
         r1, r2, r3, r4 = st.columns(4)
-        r1.metric("Latest quarter YoY", _fund_pct(fund.get("revenue_q_yoy")))
+        r1.metric(
+            "Latest quarter YoY",
+            (
+                _fund_pct(fund.get("revenue_q_yoy"))
+                if pd.notna(fund.get("revenue_q_yoy"))
+                else "N/A — CONCEPT REVIEW REQUIRED"
+                if fund.get("revenue_quarter_latest_period_status") == "REVIEW"
+                else "N/A"
+            ),
+        )
         r2.metric(
             "Previous quarter YoY",
             _fund_pct(fund.get("revenue_q_prior_yoy")),
@@ -835,7 +901,13 @@ def render_fundamental_quality(symbol, *, expanded=True, key_prefix="fund"):
         a1, a2, a3, a4 = st.columns(4)
         a1.metric(
             "Latest FY revenue YoY",
-            _fund_pct(fund.get("revenue_annual_yoy")),
+            (
+                _fund_pct(fund.get("revenue_annual_yoy"))
+                if pd.notna(fund.get("revenue_annual_yoy"))
+                else "N/A — CONCEPT REVIEW REQUIRED"
+                if fund.get("revenue_annual_latest_period_status") == "REVIEW"
+                else "N/A"
+            ),
         )
         annual_earn = (
             _fund_pct(fund.get("earnings_annual_yoy"))
