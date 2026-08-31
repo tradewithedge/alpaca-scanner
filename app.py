@@ -90,7 +90,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.2.2a"
+APP_VERSION = "V1.2.2.2a1"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -100,11 +100,11 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Fundamental Growth & Earnings Quality • SEC Concept Continuity & Latest-Period Integrity"
+    "• Trade With Edge • Candidate Quality Engine • Fundamental Growth & Earnings Quality • Annual Horizon & Filing-Form Integrity"
 )
 st.caption(
-    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.2.2a SEC Concept "
-    "Continuity & Latest-Period Integrity • Official SEC CompanyFacts only • "
+    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.2.2a1 Annual Horizon "
+    "& Filing-Form Integrity • Official SEC CompanyFacts only • "
     "Fundamental model remains SHADOW MODE • Frozen scanner classifications "
     "remain unchanged"
 )
@@ -411,9 +411,9 @@ def load_validation_fundamental_snapshot(symbol, identity, declared):
 
 
 def render_fundamental_validation_suite():
-    """Explicit-action V1.2.2.2 live SEC cross-company validation utility."""
+    """Explicit-action V1.2.2.2a1 live SEC cross-company validation utility."""
     st.subheader(
-        "🧪 V1.2.2.2a SEC Concept Continuity & Latest-Period Integrity"
+        "🧪 V1.2.2.2a1 Annual Horizon & Filing-Form Integrity"
     )
     st.caption(
         "READ-ONLY VALIDATION LAB: this suite does not alter Persistent Quality, "
