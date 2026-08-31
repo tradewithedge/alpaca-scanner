@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 
 
-VALIDATION_VERSION = "V1.2.2.2"
+VALIDATION_VERSION = "V1.2.2.2a"
 
 # Deliberately different reporting profiles. These are not "best stocks";
 # they are structural test cases for the extraction engine.
@@ -81,6 +81,10 @@ def classify_validation_snapshot(snapshot: dict) -> tuple[str, str]:
     )
 
 
+def _date_text(value) -> str:
+    return value.isoformat() if hasattr(value, "isoformat") else "—"
+
+
 def validation_row(case: dict, snapshot: dict) -> dict:
     result, note = classify_validation_snapshot(snapshot)
     earnings_yoy = snapshot.get("earnings_q_yoy")
@@ -93,6 +97,8 @@ def validation_row(case: dict, snapshot: dict) -> dict:
     revenue_display = (
         f"{100.0 * float(revenue_yoy):+.1f}%"
         if _finite(revenue_yoy)
+        else "N/A — CONCEPT REVIEW REQUIRED"
+        if snapshot.get("revenue_quarter_latest_period_status") == "REVIEW"
         else "N/A"
     )
 
@@ -106,13 +112,17 @@ def validation_row(case: dict, snapshot: dict) -> dict:
         "Coverage": f"{float(snapshot.get('available_weight_pct') or 0):.0f}%",
         "Fiscal calendar": snapshot.get("fiscal_calendar", "UNKNOWN"),
         "Revenue Q YoY": revenue_display,
+        "Revenue Q end": _date_text(snapshot.get("revenue_q_end")),
+        "Issuer latest Q ref": _date_text(snapshot.get("company_quarter_reference_end")),
+        "Revenue Q concept": snapshot.get("revenue_quarter_concept") or "—",
+        "Revenue FY concept": snapshot.get("revenue_annual_concept") or "—",
+        "Concept continuity": snapshot.get("revenue_concept_continuity") or "—",
+        "Revenue latest-period": snapshot.get("revenue_quarter_latest_period_status") or "—",
         "Earnings Q YoY/state": earnings_display,
         "Earnings metric": snapshot.get("earnings_metric", "Unavailable"),
-        "Revenue concept": snapshot.get("revenue_concept") or "—",
         "Result": result,
         "Interpretation": note,
     }
-
 
 def summarize_validation_rows(rows: list[dict]) -> dict:
     counts = {"PASS": 0, "REVIEW": 0, "FAIL": 0}

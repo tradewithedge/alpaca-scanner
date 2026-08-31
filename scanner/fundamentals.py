@@ -11,7 +11,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 
-FUNDAMENTALS_VERSION = "V1.2.2.2"
+FUNDAMENTALS_VERSION = "V1.2.2.2a"
 
 SEC_TICKER_JSON_URL = "https://www.sec.gov/files/company_tickers.json"
 SEC_TICKER_TEXT_URL = "https://www.sec.gov/include/ticker.txt"
@@ -41,7 +41,7 @@ SEC_IDENTITY_MIRROR_LABEL = "SEC-derived pinned GitHub identity mirror"
 # contact email. We intentionally do NOT fabricate a user's contact email.
 DEFAULT_SEC_USER_AGENT = ""
 
-SEC_APPLICATION_NAME = "TradeWithEdge AlpacaScanner/1.2.2.2"
+SEC_APPLICATION_NAME = "TradeWithEdge AlpacaScanner/1.2.2.2a"
 SEC_EMAIL_RE = re.compile(
     r"([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})",
     re.IGNORECASE,
@@ -108,7 +108,7 @@ def build_sec_declared_user_agent(
         org = str(organization or "TradeWithEdge").strip() or "TradeWithEdge"
         return {
             "ready": True,
-            "user_agent": f"{org} AlpacaScanner/1.2.2.2 {email}",
+            "user_agent": f"{org} AlpacaScanner/1.2.2.2a {email}",
             "contact_email": email,
             "source": "SEC_CONTACT_EMAIL",
             "reason": "",
@@ -865,7 +865,13 @@ def _choose_concept(
     candidates: Iterable[tuple[str, str]],
     metric_kind: str,
 ) -> dict:
-    """Choose the first declared taxonomy concept with usable observations."""
+    """Legacy first-hit concept chooser retained for compatibility/tests.
+
+    V1.2.2.2a revenue/earnings production logic uses
+    ``_resolve_metric_domain`` below so an old-but-populated concept can no
+    longer beat a newer valid concept merely because it appears first in the
+    candidate list.
+    """
     for taxonomy, concept in candidates:
         df, unit = _concept_observations(
             companyfacts,
@@ -887,6 +893,286 @@ def _choose_concept(
         "observations": pd.DataFrame(),
     }
 
+
+def _series_as_of(series: pd.DataFrame, as_of: date) -> pd.DataFrame:
+    """Remove future period/filed facts before latest-period selection."""
+    if series is None or series.empty:
+        return pd.DataFrame()
+    df = series.copy()
+    df = df[df["end"].apply(lambda x: isinstance(x, date) and x <= as_of)]
+    if "filed" in df.columns:
+        df = df[
+            df["filed"].apply(
+                lambda x: x is None or (isinstance(x, date) and x <= as_of)
+            )
+        ]
+    return df.reset_index(drop=True)
+
+
+def _candidate_period_profile(
+    companyfacts: dict,
+    taxonomy: str,
+    concept: str,
+    metric_kind: str,
+    *,
+    as_of: date,
+    priority: int,
+) -> dict:
+    observations, unit = _concept_observations(
+        companyfacts,
+        taxonomy,
+        concept,
+        metric_kind,
+    )
+    observations = _series_as_of(observations, as_of)
+    quarter = _period_series(observations, "quarter")
+    annual = _period_series(observations, "annual")
+    q_growth = _latest_growth(quarter, earnings=(metric_kind in {"eps", "net_income"}))
+    a_growth = _latest_annual_growth(annual, earnings=(metric_kind in {"eps", "net_income"}))
+    latest_q_end = quarter.iloc[-1]["end"] if not quarter.empty else None
+    latest_a_end = annual.iloc[-1]["end"] if not annual.empty else None
+    latest_any_end = observations["end"].max() if not observations.empty else None
+    return {
+        "taxonomy": taxonomy,
+        "concept": concept,
+        "unit": unit,
+        "priority": priority,
+        "observations": observations,
+        "quarter": quarter,
+        "annual": annual,
+        "quarter_growth": q_growth,
+        "annual_growth": a_growth,
+        "latest_quarter_end": latest_q_end,
+        "latest_annual_end": latest_a_end,
+        "latest_any_end": latest_any_end,
+        "quarter_count": int(len(quarter)),
+        "annual_count": int(len(annual)),
+        "quarter_pair_ready": q_growth.get("pair") is not None,
+        "annual_pair_ready": a_growth.get("pair") is not None,
+    }
+
+
+def _max_date(values) -> date | None:
+    dates = [x for x in values if isinstance(x, date)]
+    return max(dates) if dates else None
+
+
+def _period_lag_days(metric_end: date | None, reference_end: date | None) -> int | None:
+    if not isinstance(metric_end, date) or not isinstance(reference_end, date):
+        return None
+    return int((reference_end - metric_end).days)
+
+
+def _select_period_profile(
+    profiles: list[dict],
+    *,
+    period: str,
+    reference_end: date | None,
+) -> dict | None:
+    """Choose the freshest approved concept for one reporting horizon.
+
+    Hard rule: freshness outranks candidate declaration order. A concept that
+    ends years earlier can never win over an approved concept containing the
+    issuer's current reporting period.
+    """
+    if period not in {"quarter", "annual"}:
+        raise ValueError("period must be quarter or annual")
+    end_key = f"latest_{period}_end"
+    pair_key = f"{period}_pair_ready"
+    count_key = f"{period}_count"
+    eligible = [p for p in profiles if isinstance(p.get(end_key), date)]
+    if not eligible:
+        return None
+
+    def rank(p):
+        end = p.get(end_key)
+        lag = _period_lag_days(end, reference_end)
+        # Lower lag is fresher. Valid latest YoY pair and deeper history break
+        # ties. Original candidate order is only the final tie-breaker.
+        return (
+            -(10_000_000 if lag is None else max(0, 10_000_000 - lag)),
+            -int(bool(p.get(pair_key))),
+            -int(p.get(count_key) or 0),
+            int(p.get("priority") or 0),
+        )
+
+    # Easier/clearer equivalent ranking: max by date first, then pair/history.
+    eligible.sort(
+        key=lambda p: (
+            p.get(end_key),
+            bool(p.get(pair_key)),
+            int(p.get(count_key) or 0),
+            -int(p.get("priority") or 0),
+        ),
+        reverse=True,
+    )
+    return eligible[0]
+
+
+def _metric_selection_status(
+    *,
+    selected_end: date | None,
+    domain_reference_end: date | None,
+    company_reference_end: date | None,
+    max_company_lag_days: int,
+) -> dict:
+    """Latest-period hard gate used before any metric is allowed into scoring."""
+    domain_lag = _period_lag_days(selected_end, domain_reference_end)
+    company_lag = _period_lag_days(selected_end, company_reference_end)
+    issues = []
+
+    if selected_end is None:
+        issues.append("no approved concept contains this reporting horizon")
+    if domain_lag is not None and domain_lag > 0:
+        issues.append(
+            f"selected concept lags freshest approved concept by {domain_lag}d"
+        )
+    if company_lag is not None and company_lag > max_company_lag_days:
+        issues.append(
+            f"metric period lags issuer latest comparable period by {company_lag}d"
+        )
+
+    return {
+        "status": "REVIEW" if issues else "PASS",
+        "selected_end": selected_end,
+        "domain_reference_end": domain_reference_end,
+        "company_reference_end": company_reference_end,
+        "domain_lag_days": domain_lag,
+        "company_lag_days": company_lag,
+        "issues": issues,
+    }
+
+
+def _resolve_metric_domain(
+    companyfacts: dict,
+    candidates: Iterable[tuple[str, str]],
+    metric_kind: str,
+    *,
+    as_of: date,
+    company_quarter_reference_end: date | None = None,
+    company_annual_reference_end: date | None = None,
+) -> dict:
+    """Resolve current quarter and annual concepts independently but explicitly.
+
+    This is the V1.2.2.2a concept-continuity engine. It permits a documented
+    concept transition/split source when SEC tagging changes, but blocks stale
+    observations from being presented as a current metric.
+    """
+    profiles = [
+        _candidate_period_profile(
+            companyfacts,
+            taxonomy,
+            concept,
+            metric_kind,
+            as_of=as_of,
+            priority=i,
+        )
+        for i, (taxonomy, concept) in enumerate(candidates)
+    ]
+    profiles = [p for p in profiles if not p["observations"].empty]
+
+    domain_q_ref = _max_date(p.get("latest_quarter_end") for p in profiles)
+    domain_a_ref = _max_date(p.get("latest_annual_end") for p in profiles)
+    q_sel = _select_period_profile(
+        profiles,
+        period="quarter",
+        reference_end=domain_q_ref,
+    )
+    a_sel = _select_period_profile(
+        profiles,
+        period="annual",
+        reference_end=domain_a_ref,
+    )
+
+    q_status = _metric_selection_status(
+        selected_end=(q_sel or {}).get("latest_quarter_end"),
+        domain_reference_end=domain_q_ref,
+        company_reference_end=company_quarter_reference_end or domain_q_ref,
+        max_company_lag_days=45,
+    )
+    a_status = _metric_selection_status(
+        selected_end=(a_sel or {}).get("latest_annual_end"),
+        domain_reference_end=domain_a_ref,
+        company_reference_end=company_annual_reference_end or domain_a_ref,
+        max_company_lag_days=45,
+    )
+
+    q_ok = q_status["status"] == "PASS" and q_sel is not None
+    a_ok = a_status["status"] == "PASS" and a_sel is not None
+
+    q_concept = (q_sel or {}).get("concept")
+    a_concept = (a_sel or {}).get("concept")
+    q_effective = q_concept if q_ok else None
+    a_effective = a_concept if a_ok else None
+    if q_effective and a_effective:
+        continuity = (
+            "SINGLE CURRENT SOURCE"
+            if q_effective == a_effective
+            else "SPLIT CURRENT SOURCES"
+        )
+    elif q_effective or a_effective:
+        continuity = "PARTIAL CURRENT SOURCE"
+    else:
+        continuity = "CONCEPT REVIEW REQUIRED"
+
+    notes = []
+    for label, status in (("quarter", q_status), ("annual", a_status)):
+        for issue in status.get("issues", []):
+            notes.append(f"{label}: {issue}")
+    if continuity == "SPLIT CURRENT SOURCES":
+        notes.append(
+            f"approved SEC concept transition: quarter={q_effective}, annual={a_effective}"
+        )
+
+    return {
+        "profiles": profiles,
+        "quarter": q_sel,
+        "annual": a_sel,
+        "quarter_series": q_sel.get("quarter") if q_ok else pd.DataFrame(),
+        "annual_series": a_sel.get("annual") if a_ok else pd.DataFrame(),
+        "quarter_status": q_status,
+        "annual_status": a_status,
+        "quarter_concept": q_effective,
+        "annual_concept": a_effective,
+        "quarter_taxonomy": (q_sel or {}).get("taxonomy") if q_ok else None,
+        "annual_taxonomy": (a_sel or {}).get("taxonomy") if a_ok else None,
+        "quarter_unit": (q_sel or {}).get("unit") if q_ok else None,
+        "annual_unit": (a_sel or {}).get("unit") if a_ok else None,
+        "continuity_status": continuity,
+        "continuity_notes": notes,
+        "domain_quarter_reference_end": domain_q_ref,
+        "domain_annual_reference_end": domain_a_ref,
+    }
+
+
+def _company_period_references(
+    companyfacts: dict,
+    *,
+    as_of: date,
+) -> tuple[date | None, date | None]:
+    """Latest known approved reporting horizons across revenue/earnings domains."""
+    profiles = []
+    domains = (
+        (REVENUE_CONCEPTS, "revenue"),
+        (EPS_CONCEPTS, "eps"),
+        (NET_INCOME_CONCEPTS, "net_income"),
+    )
+    for candidates, metric_kind in domains:
+        for i, (taxonomy, concept) in enumerate(candidates):
+            p = _candidate_period_profile(
+                companyfacts,
+                taxonomy,
+                concept,
+                metric_kind,
+                as_of=as_of,
+                priority=i,
+            )
+            if not p["observations"].empty:
+                profiles.append(p)
+    return (
+        _max_date(p.get("latest_quarter_end") for p in profiles),
+        _max_date(p.get("latest_annual_end") for p in profiles),
+    )
 
 def _period_series(observations: pd.DataFrame, period: str) -> pd.DataFrame:
     if observations is None or observations.empty:
@@ -1366,8 +1652,10 @@ def _overall_metric_integrity(
     earnings_concept: str | None,
     available_weight: float,
     checks: dict,
+    selection_checks: dict | None = None,
 ) -> tuple[str, str]:
-    """Combine structural checks without changing the fundamental score."""
+    """Combine structural + latest-period checks without changing the score."""
+    selection_checks = selection_checks or {}
     used_failures = [
         name for name, check in checks.items()
         if check.get("status") == "FAIL"
@@ -1383,10 +1671,15 @@ def _overall_metric_integrity(
         name for name, check in checks.items()
         if check.get("status") == "REVIEW"
     ]
+    for name, check in selection_checks.items():
+        if check.get("status") == "REVIEW":
+            issues = "; ".join(check.get("issues") or []) or "latest-period review"
+            review_items.append(f"{name}: {issues}")
+
     if not revenue_concept:
-        review_items.append("revenue concept unavailable")
+        review_items.append("current revenue concept unavailable")
     if not earnings_concept:
-        review_items.append("earnings concept unavailable")
+        review_items.append("current earnings concept unavailable")
     if available_weight < 80:
         review_items.append(
             f"metric coverage {available_weight:.0f}% is below 80%"
@@ -1400,9 +1693,8 @@ def _overall_metric_integrity(
 
     return (
         "PASS",
-        "All used quarter/annual SEC period pairs passed structural integrity checks.",
+        "All used SEC period pairs and latest-period concept selections passed integrity checks.",
     )
-
 
 def build_fundamental_snapshot(
     ticker: str,
@@ -1412,35 +1704,61 @@ def build_fundamental_snapshot(
     company_name: str | None = None,
     as_of: date | None = None,
 ) -> dict:
-    """Build explainable revenue/earnings diagnostics from SEC CompanyFacts.
+    """Build explainable SEC fundamentals with concept/latest-period integrity.
 
-    V1.2.2.1a remains deliberately SHADOW MODE. This function does not know about or
-    modify scanner eligibility, buckets, entry quality, or trade decisions.
+    V1.2.2.2a remains SHADOW MODE. It may diagnose or suppress an unsafe
+    fundamental metric, but it never alters scanner eligibility/buckets/trades.
     """
     ticker = normalize_sec_ticker(ticker)
     as_of = as_of or date.today()
 
-    revenue = _choose_concept(companyfacts, REVENUE_CONCEPTS, "revenue")
-    eps = _choose_concept(companyfacts, EPS_CONCEPTS, "eps")
-    net_income = _choose_concept(
+    company_q_ref, company_a_ref = _company_period_references(
+        companyfacts,
+        as_of=as_of,
+    )
+
+    revenue = _resolve_metric_domain(
+        companyfacts,
+        REVENUE_CONCEPTS,
+        "revenue",
+        as_of=as_of,
+        company_quarter_reference_end=company_q_ref,
+        company_annual_reference_end=company_a_ref,
+    )
+    eps = _resolve_metric_domain(
+        companyfacts,
+        EPS_CONCEPTS,
+        "eps",
+        as_of=as_of,
+        company_quarter_reference_end=company_q_ref,
+        company_annual_reference_end=company_a_ref,
+    )
+    net_income = _resolve_metric_domain(
         companyfacts,
         NET_INCOME_CONCEPTS,
         "net_income",
+        as_of=as_of,
+        company_quarter_reference_end=company_q_ref,
+        company_annual_reference_end=company_a_ref,
     )
 
-    earnings_source = eps if not eps["observations"].empty else net_income
+    eps_has_any = (
+        not eps["quarter_series"].empty or not eps["annual_series"].empty
+    )
+    net_has_any = (
+        not net_income["quarter_series"].empty or not net_income["annual_series"].empty
+    )
+    earnings_source = eps if eps_has_any else net_income
     earnings_metric = (
-        "Diluted EPS"
-        if earnings_source is eps and not eps["observations"].empty
-        else "Net Income"
-        if not net_income["observations"].empty
+        "Diluted EPS" if eps_has_any
+        else "Net Income" if net_has_any
         else "Unavailable"
     )
 
-    rev_q = _period_series(revenue["observations"], "quarter")
-    rev_a = _period_series(revenue["observations"], "annual")
-    earn_q = _period_series(earnings_source["observations"], "quarter")
-    earn_a = _period_series(earnings_source["observations"], "annual")
+    rev_q = revenue["quarter_series"]
+    rev_a = revenue["annual_series"]
+    earn_q = earnings_source["quarter_series"]
+    earn_a = earnings_source["annual_series"]
 
     rev_q_growth = _latest_growth(rev_q, earnings=False)
     earn_q_growth = _latest_growth(earn_q, earnings=True)
@@ -1449,42 +1767,34 @@ def build_fundamental_snapshot(
 
     metric_integrity_checks = {
         "Revenue quarter": _metric_pair_integrity(
-            rev_q_growth.get("pair"),
-            period="quarter",
-            as_of=as_of,
+            rev_q_growth.get("pair"), period="quarter", as_of=as_of,
         ),
         "Earnings quarter": _metric_pair_integrity(
-            earn_q_growth.get("pair"),
-            period="quarter",
-            as_of=as_of,
+            earn_q_growth.get("pair"), period="quarter", as_of=as_of,
         ),
         "Revenue annual": _metric_pair_integrity(
-            rev_a_growth.get("pair"),
-            period="annual",
-            as_of=as_of,
+            rev_a_growth.get("pair"), period="annual", as_of=as_of,
         ),
         "Earnings annual": _metric_pair_integrity(
-            earn_a_growth.get("pair"),
-            period="annual",
-            as_of=as_of,
+            earn_a_growth.get("pair"), period="annual", as_of=as_of,
         ),
+    }
+    selection_checks = {
+        "Revenue quarter latest-period": revenue["quarter_status"],
+        "Revenue annual latest-period": revenue["annual_status"],
+        "Earnings quarter latest-period": earnings_source["quarter_status"],
+        "Earnings annual latest-period": earnings_source["annual_status"],
     }
 
     components = {
-        "quarter_revenue": (
-            _growth_component(rev_q_growth["growth"], earnings=False),
-            25.0,
-        ),
+        "quarter_revenue": (_growth_component(rev_q_growth["growth"], earnings=False), 25.0),
         "quarter_earnings": (
             _growth_component(earn_q_growth["growth"], earnings=True)
             if np.isfinite(earn_q_growth["growth"])
             else _earnings_state_score(earn_q_growth["state"]),
             25.0,
         ),
-        "annual_revenue": (
-            _growth_component(rev_a_growth["growth"], earnings=False),
-            10.0,
-        ),
+        "annual_revenue": (_growth_component(rev_a_growth["growth"], earnings=False), 10.0),
         "annual_earnings": (
             _growth_component(earn_a_growth["growth"], earnings=True)
             if np.isfinite(earn_a_growth["growth"])
@@ -1492,27 +1802,13 @@ def build_fundamental_snapshot(
             10.0,
         ),
         "revenue_consistency": (
-            _consistency_score(
-                rev_q_growth["positive_count"],
-                rev_q_growth["valid_count"],
-            ),
-            10.0,
+            _consistency_score(rev_q_growth["positive_count"], rev_q_growth["valid_count"]), 10.0,
         ),
         "earnings_consistency": (
-            _consistency_score(
-                earn_q_growth["positive_count"],
-                earn_q_growth["valid_count"],
-            ),
-            10.0,
+            _consistency_score(earn_q_growth["positive_count"], earn_q_growth["valid_count"]), 10.0,
         ),
-        "revenue_acceleration": (
-            _momentum_score(rev_q_growth["change"]),
-            5.0,
-        ),
-        "earnings_acceleration": (
-            _momentum_score(earn_q_growth["change"]),
-            5.0,
-        ),
+        "revenue_acceleration": (_momentum_score(rev_q_growth["change"]), 5.0),
+        "earnings_acceleration": (_momentum_score(earn_q_growth["change"]), 5.0),
     }
 
     weighted_sum = 0.0
@@ -1521,155 +1817,114 @@ def build_fundamental_snapshot(
         if value is not None and np.isfinite(value):
             weighted_sum += float(value) * weight
             available_weight += weight
+    score = weighted_sum / available_weight if available_weight >= 60.0 else np.nan
 
-    score = (
-        weighted_sum / available_weight
-        if available_weight >= 60.0
-        else np.nan
+    current_revenue_concept = revenue.get("quarter_concept") or revenue.get("annual_concept")
+    current_earnings_concept = earnings_source.get("quarter_concept") or earnings_source.get("annual_concept")
+    metric_integrity_status, metric_integrity_summary = _overall_metric_integrity(
+        revenue_concept=current_revenue_concept,
+        earnings_concept=current_earnings_concept,
+        available_weight=available_weight,
+        checks=metric_integrity_checks,
+        selection_checks=selection_checks,
     )
 
-    metric_integrity_status, metric_integrity_summary = (
-        _overall_metric_integrity(
-            revenue_concept=revenue.get("concept"),
-            earnings_concept=earnings_source.get("concept"),
-            available_weight=available_weight,
-            checks=metric_integrity_checks,
-        )
-    )
     fiscal_calendar = _fiscal_calendar_label(
-        rev_a_growth.get("pair"),
-        earn_a_growth.get("pair"),
+        rev_a_growth.get("pair"), earn_a_growth.get("pair"),
     )
+
     metric_integrity_rows = [
         _metric_provenance_row(
             "Revenue quarter",
-            taxonomy=revenue.get("taxonomy"),
-            concept=revenue.get("concept"),
-            unit=revenue.get("unit"),
+            taxonomy=revenue.get("quarter_taxonomy"),
+            concept=revenue.get("quarter_concept"),
+            unit=revenue.get("quarter_unit"),
             pair=rev_q_growth.get("pair"),
             integrity=metric_integrity_checks["Revenue quarter"],
         ),
         _metric_provenance_row(
             f"{earnings_metric} quarter",
-            taxonomy=earnings_source.get("taxonomy"),
-            concept=earnings_source.get("concept"),
-            unit=earnings_source.get("unit"),
+            taxonomy=earnings_source.get("quarter_taxonomy"),
+            concept=earnings_source.get("quarter_concept"),
+            unit=earnings_source.get("quarter_unit"),
             pair=earn_q_growth.get("pair"),
             integrity=metric_integrity_checks["Earnings quarter"],
         ),
         _metric_provenance_row(
             "Revenue annual",
-            taxonomy=revenue.get("taxonomy"),
-            concept=revenue.get("concept"),
-            unit=revenue.get("unit"),
+            taxonomy=revenue.get("annual_taxonomy"),
+            concept=revenue.get("annual_concept"),
+            unit=revenue.get("annual_unit"),
             pair=rev_a_growth.get("pair"),
             integrity=metric_integrity_checks["Revenue annual"],
         ),
         _metric_provenance_row(
             f"{earnings_metric} annual",
-            taxonomy=earnings_source.get("taxonomy"),
-            concept=earnings_source.get("concept"),
-            unit=earnings_source.get("unit"),
+            taxonomy=earnings_source.get("annual_taxonomy"),
+            concept=earnings_source.get("annual_concept"),
+            unit=earnings_source.get("annual_unit"),
             pair=earn_a_growth.get("pair"),
             integrity=metric_integrity_checks["Earnings annual"],
         ),
     ]
 
     latest_filed_candidates = [
-        rev_q_growth.get("filed"),
-        earn_q_growth.get("filed"),
-        rev_a_growth.get("filed"),
-        earn_a_growth.get("filed"),
+        rev_q_growth.get("filed"), earn_q_growth.get("filed"),
+        rev_a_growth.get("filed"), earn_a_growth.get("filed"),
     ]
-    latest_filed_candidates = [
-        d for d in latest_filed_candidates if isinstance(d, date)
-    ]
+    latest_filed_candidates = [d for d in latest_filed_candidates if isinstance(d, date)]
     latest_filed = max(latest_filed_candidates) if latest_filed_candidates else None
     age_days = (as_of - latest_filed).days if latest_filed else None
 
     rev_has_q = rev_q_growth["end"] is not None
     earn_has_q = earn_q_growth["end"] is not None
-    both_growth_domains = (
-        revenue["concept"] is not None
-        and earnings_source["concept"] is not None
-    )
-
+    both_growth_domains = current_revenue_concept is not None and current_earnings_concept is not None
     if not both_growth_domains:
         confidence = "UNKNOWN"
     elif (
-        rev_has_q
-        and earn_has_q
-        and age_days is not None
-        and age_days <= 180
-        and available_weight >= 80
-        and earnings_metric == "Diluted EPS"
+        rev_has_q and earn_has_q and age_days is not None and age_days <= 180
+        and available_weight >= 80 and earnings_metric == "Diluted EPS"
     ):
         confidence = "HIGH"
-    elif (
-        age_days is not None
-        and age_days <= 270
-        and available_weight >= 60
-    ):
+    elif age_days is not None and age_days <= 270 and available_weight >= 60:
         confidence = "MEDIUM"
     else:
         confidence = "LOW"
 
-    reasons = []
-    risks = []
-
-    rg = rev_q_growth["growth"]
-    eg = earn_q_growth["growth"]
-
+    reasons, risks = [], []
+    rg, eg = rev_q_growth["growth"], earn_q_growth["growth"]
     if np.isfinite(rg):
-        if rg >= 0.20:
-            reasons.append(f"quarterly revenue growth {_fmt_pct(rg)}")
-        elif rg < 0:
-            risks.append(f"quarterly revenue growth {_fmt_pct(rg)}")
-        else:
-            reasons.append(f"quarterly revenue growth {_fmt_pct(rg)}")
+        reasons.append(f"quarterly revenue growth {_fmt_pct(rg)}") if rg >= 0 else risks.append(f"quarterly revenue growth {_fmt_pct(rg)}")
     else:
-        risks.append("quarterly revenue YoY unavailable")
+        if revenue["quarter_status"]["status"] != "PASS":
+            risks.append("quarterly revenue YoY unavailable — CONCEPT REVIEW REQUIRED")
+        else:
+            risks.append("quarterly revenue YoY unavailable")
 
     if np.isfinite(eg):
-        if eg >= 0.20:
-            reasons.append(
-                f"quarterly {earnings_metric.lower()} growth {_fmt_pct(eg)}"
-            )
-        elif eg < 0:
-            risks.append(
-                f"quarterly {earnings_metric.lower()} growth {_fmt_pct(eg)}"
-            )
-        else:
-            reasons.append(
-                f"quarterly {earnings_metric.lower()} growth {_fmt_pct(eg)}"
-            )
+        reasons.append(f"quarterly {earnings_metric.lower()} growth {_fmt_pct(eg)}") if eg >= 0 else risks.append(f"quarterly {earnings_metric.lower()} growth {_fmt_pct(eg)}")
     elif earn_q_growth["state"] == "TURNAROUND":
         reasons.append(f"{earnings_metric} turned positive year-over-year")
     elif earn_q_growth["state"] not in {"N/A", "GROWTH"}:
-        risks.append(
-            f"{earnings_metric} state: {earn_q_growth['state']}"
-        )
+        risks.append(f"{earnings_metric} state: {earn_q_growth['state']}")
     else:
         risks.append(f"quarterly {earnings_metric.lower()} YoY unavailable")
 
-    for label, change in [
-        ("revenue", rev_q_growth["change"]),
-        ("earnings", earn_q_growth["change"]),
-    ]:
+    for label, change in [("revenue", rev_q_growth["change"]), ("earnings", earn_q_growth["change"])]:
         if np.isfinite(change):
-            phrase = (
-                f"{label} growth momentum "
-                f"{_fmt_pct(rev_q_growth['prior_growth'] if label == 'revenue' else earn_q_growth['prior_growth'])}"
-                f" → {_fmt_pct(rg if label == 'revenue' else eg)} "
-                f"({_fmt_pp(change)})"
-            )
-            if change >= 0.05:
-                reasons.append("accelerating " + phrase)
-            elif change <= -0.05:
-                risks.append("decelerating " + phrase)
+            prior = rev_q_growth["prior_growth"] if label == "revenue" else earn_q_growth["prior_growth"]
+            current = rg if label == "revenue" else eg
+            phrase = f"{label} growth momentum {_fmt_pct(prior)} → {_fmt_pct(current)} ({_fmt_pp(change)})"
+            if change >= 0.05: reasons.append("accelerating " + phrase)
+            elif change <= -0.05: risks.append("decelerating " + phrase)
 
-    if confidence != "HIGH":
-        risks.append(f"Fundamental Data Confidence {confidence}")
+    if revenue["continuity_status"] == "SPLIT CURRENT SOURCES":
+        reasons.append("SEC revenue concept transition resolved with current quarter/FY sources")
+    if revenue["continuity_notes"]:
+        for note in revenue["continuity_notes"]:
+            if "lags" in note or "no approved" in note:
+                risks.append("revenue concept integrity: " + note)
+    if confidence != "HIGH": risks.append(f"Fundamental Data Confidence {confidence}")
 
     return {
         "ticker": ticker,
@@ -1695,16 +1950,33 @@ def build_fundamental_snapshot(
         "metric_integrity_status": metric_integrity_status,
         "metric_integrity_summary": metric_integrity_summary,
         "metric_integrity_checks": metric_integrity_checks,
+        "metric_selection_checks": selection_checks,
         "metric_integrity_rows": metric_integrity_rows,
         "fiscal_calendar": fiscal_calendar,
+        "company_quarter_reference_end": company_q_ref,
+        "company_annual_reference_end": company_a_ref,
         "latest_filed": latest_filed,
         "latest_filed_age_days": age_days,
-        "revenue_taxonomy": revenue["taxonomy"],
-        "revenue_concept": revenue["concept"],
-        "revenue_unit": revenue["unit"],
-        "earnings_taxonomy": earnings_source["taxonomy"],
-        "earnings_concept": earnings_source["concept"],
-        "earnings_unit": earnings_source["unit"],
+        "revenue_taxonomy": revenue.get("quarter_taxonomy") or revenue.get("annual_taxonomy"),
+        "revenue_concept": current_revenue_concept,
+        "revenue_unit": revenue.get("quarter_unit") or revenue.get("annual_unit"),
+        "revenue_quarter_taxonomy": revenue.get("quarter_taxonomy"),
+        "revenue_quarter_concept": revenue.get("quarter_concept"),
+        "revenue_quarter_unit": revenue.get("quarter_unit"),
+        "revenue_annual_taxonomy": revenue.get("annual_taxonomy"),
+        "revenue_annual_concept": revenue.get("annual_concept"),
+        "revenue_annual_unit": revenue.get("annual_unit"),
+        "revenue_concept_continuity": revenue.get("continuity_status"),
+        "revenue_concept_notes": revenue.get("continuity_notes"),
+        "revenue_quarter_latest_period_status": revenue["quarter_status"]["status"],
+        "revenue_annual_latest_period_status": revenue["annual_status"]["status"],
+        "revenue_quarter_domain_reference_end": revenue.get("domain_quarter_reference_end"),
+        "revenue_annual_domain_reference_end": revenue.get("domain_annual_reference_end"),
+        "revenue_quarter_company_lag_days": revenue["quarter_status"].get("company_lag_days"),
+        "revenue_annual_company_lag_days": revenue["annual_status"].get("company_lag_days"),
+        "earnings_taxonomy": earnings_source.get("quarter_taxonomy") or earnings_source.get("annual_taxonomy"),
+        "earnings_concept": current_earnings_concept,
+        "earnings_unit": earnings_source.get("quarter_unit") or earnings_source.get("annual_unit"),
         "earnings_metric": earnings_metric,
         "revenue_q_yoy": rev_q_growth["growth"],
         "revenue_q_pair": rev_q_growth.get("pair"),
@@ -1731,10 +2003,9 @@ def build_fundamental_snapshot(
         "earnings_annual_pair": earn_a_growth.get("pair"),
         "earnings_annual_state": earn_a_growth["state"],
         "earnings_annual_end": earn_a_growth["end"],
-        "fundamental_reasons": "; ".join(reasons),
-        "fundamental_risks": "; ".join(risks),
+        "fundamental_reasons": "; ".join(dict.fromkeys(reasons)),
+        "fundamental_risks": "; ".join(dict.fromkeys(risks)),
     }
-
 
 def unavailable_snapshot(
     ticker: str,
@@ -1778,8 +2049,21 @@ def unavailable_snapshot(
         "metric_integrity_status": "NOT AVAILABLE",
         "metric_integrity_summary": str(reason),
         "metric_integrity_checks": {},
+        "metric_selection_checks": {},
         "metric_integrity_rows": [],
         "fiscal_calendar": "UNKNOWN",
+        "company_quarter_reference_end": None,
+        "company_annual_reference_end": None,
+        "revenue_quarter_concept": None,
+        "revenue_annual_concept": None,
+        "revenue_concept_continuity": "CONCEPT REVIEW REQUIRED",
+        "revenue_concept_notes": [],
+        "revenue_quarter_latest_period_status": "NOT AVAILABLE",
+        "revenue_annual_latest_period_status": "NOT AVAILABLE",
+        "revenue_quarter_domain_reference_end": None,
+        "revenue_annual_domain_reference_end": None,
+        "revenue_quarter_company_lag_days": None,
+        "revenue_annual_company_lag_days": None,
         "latest_filed": None,
         "latest_filed_age_days": None,
         "revenue_q_yoy": np.nan,
