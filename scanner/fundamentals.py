@@ -11,7 +11,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 
-FUNDAMENTALS_VERSION = "V1.2.2.1b1"
+FUNDAMENTALS_VERSION = "V1.2.2.2"
 
 SEC_TICKER_JSON_URL = "https://www.sec.gov/files/company_tickers.json"
 SEC_TICKER_TEXT_URL = "https://www.sec.gov/include/ticker.txt"
@@ -41,7 +41,7 @@ SEC_IDENTITY_MIRROR_LABEL = "SEC-derived pinned GitHub identity mirror"
 # contact email. We intentionally do NOT fabricate a user's contact email.
 DEFAULT_SEC_USER_AGENT = ""
 
-SEC_APPLICATION_NAME = "TradeWithEdge AlpacaScanner/1.2.2.1b1"
+SEC_APPLICATION_NAME = "TradeWithEdge AlpacaScanner/1.2.2.2"
 SEC_EMAIL_RE = re.compile(
     r"([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})",
     re.IGNORECASE,
@@ -108,7 +108,7 @@ def build_sec_declared_user_agent(
         org = str(organization or "TradeWithEdge").strip() or "TradeWithEdge"
         return {
             "ready": True,
-            "user_agent": f"{org} AlpacaScanner/1.2.2.1b1 {email}",
+            "user_agent": f"{org} AlpacaScanner/1.2.2.2 {email}",
             "contact_email": email,
             "source": "SEC_CONTACT_EMAIL",
             "reason": "",
@@ -953,6 +953,26 @@ def _growth(current: float, prior: float, earnings: bool = False):
     return float(current / prior - 1.0), "GROWTH"
 
 
+def _row_provenance(row) -> dict:
+    """Compact provenance for one SEC duration fact used in a calculation."""
+    if row is None:
+        return {}
+    try:
+        return {
+            "start": row.get("start"),
+            "end": row.get("end"),
+            "filed": row.get("filed"),
+            "val": float(row.get("val")),
+            "form": row.get("form"),
+            "fy": row.get("fy"),
+            "fp": row.get("fp"),
+            "accn": row.get("accn"),
+            "duration_days": int(row.get("duration_days")),
+        }
+    except Exception:
+        return {}
+
+
 def _yoy_observations(
     series: pd.DataFrame,
     *,
@@ -972,6 +992,13 @@ def _yoy_observations(
             float(prior["val"]),
             earnings=earnings,
         )
+        current_end = current.get("end")
+        prior_end = prior.get("end")
+        gap_days = (
+            (current_end - prior_end).days
+            if isinstance(current_end, date) and isinstance(prior_end, date)
+            else None
+        )
         out.append(
             {
                 "end": current["end"],
@@ -980,14 +1007,15 @@ def _yoy_observations(
                 "prior": float(prior["val"]),
                 "growth": growth,
                 "state": state,
+                "gap_days": gap_days,
+                "current_meta": _row_provenance(current),
+                "prior_meta": _row_provenance(prior),
             }
         )
     return out
 
-
 def _latest_growth(series: pd.DataFrame, earnings: bool = False) -> dict:
-    obs = _yoy_observations(series, earnings=earnings)
-    if not obs:
+    if series is None or series.empty:
         return {
             "growth": np.nan,
             "state": "N/A",
@@ -997,13 +1025,58 @@ def _latest_growth(series: pd.DataFrame, earnings: bool = False) -> dict:
             "change": np.nan,
             "positive_count": 0,
             "valid_count": 0,
+            "pair": None,
+            "prior_growth_pair": None,
         }
 
-    latest = obs[-1]
+    obs = _yoy_observations(series, earnings=earnings)
+
+    # Critical integrity rule:
+    # the displayed "latest quarter YoY" must correspond to the actual latest
+    # quarter-duration fact. If that period has no valid YoY comparator, return
+    # N/A rather than silently falling back to an older quarter.
+    latest_period = series.iloc[-1]
+    latest_end = latest_period.get("end")
+    latest_filed = latest_period.get("filed")
+    latest = next(
+        (item for item in reversed(obs) if item.get("end") == latest_end),
+        None,
+    )
+
+    recent = obs[-4:]
+    valid_growths = [
+        item["growth"]
+        for item in recent
+        if np.isfinite(item.get("growth", np.nan))
+    ]
+
+    if latest is None:
+        return {
+            "growth": np.nan,
+            "state": "N/A",
+            "end": latest_end,
+            "filed": latest_filed,
+            "prior_growth": np.nan,
+            "change": np.nan,
+            "positive_count": int(sum(g > 0 for g in valid_growths)),
+            "valid_count": int(len(valid_growths)),
+            "pair": None,
+            "prior_growth_pair": (
+                next(
+                    (
+                        item for item in reversed(obs)
+                        if np.isfinite(item.get("growth", np.nan))
+                    ),
+                    None,
+                )
+            ),
+        }
+
     previous_valid = next(
         (
-            item for item in reversed(obs[:-1])
-            if np.isfinite(item.get("growth", np.nan))
+            item for item in reversed(obs)
+            if item.get("end") != latest.get("end")
+            and np.isfinite(item.get("growth", np.nan))
         ),
         None,
     )
@@ -1020,13 +1093,6 @@ def _latest_growth(series: pd.DataFrame, earnings: bool = False) -> dict:
         else np.nan
     )
 
-    recent = obs[-4:]
-    valid_growths = [
-        item["growth"]
-        for item in recent
-        if np.isfinite(item.get("growth", np.nan))
-    ]
-
     return {
         "growth": latest_growth,
         "state": latest.get("state", "N/A"),
@@ -1036,12 +1102,19 @@ def _latest_growth(series: pd.DataFrame, earnings: bool = False) -> dict:
         "change": change,
         "positive_count": int(sum(g > 0 for g in valid_growths)),
         "valid_count": int(len(valid_growths)),
+        "pair": latest,
+        "prior_growth_pair": previous_valid,
     }
-
 
 def _latest_annual_growth(series: pd.DataFrame, earnings: bool = False) -> dict:
     if series is None or len(series) < 2:
-        return {"growth": np.nan, "state": "N/A", "end": None, "filed": None}
+        return {
+            "growth": np.nan,
+            "state": "N/A",
+            "end": None,
+            "filed": None,
+            "pair": None,
+        }
 
     current = series.iloc[-1]
     prior = series.iloc[-2]
@@ -1050,13 +1123,30 @@ def _latest_annual_growth(series: pd.DataFrame, earnings: bool = False) -> dict:
         float(prior["val"]),
         earnings=earnings,
     )
+    current_end = current.get("end")
+    prior_end = prior.get("end")
+    gap_days = (
+        (current_end - prior_end).days
+        if isinstance(current_end, date) and isinstance(prior_end, date)
+        else None
+    )
     return {
         "growth": growth,
         "state": state,
         "end": current["end"],
         "filed": current["filed"],
+        "pair": {
+            "end": current.get("end"),
+            "filed": current.get("filed"),
+            "current": float(current["val"]),
+            "prior": float(prior["val"]),
+            "growth": growth,
+            "state": state,
+            "gap_days": gap_days,
+            "current_meta": _row_provenance(current),
+            "prior_meta": _row_provenance(prior),
+        },
     }
-
 
 def _interp_score(value, points) -> float:
     if value is None or not np.isfinite(value):
@@ -1135,6 +1225,185 @@ def _fmt_pp(value) -> str:
     return f"{100.0 * float(value):+.1f}pp"
 
 
+
+def _metric_pair_integrity(
+    pair: dict | None,
+    *,
+    period: str,
+    as_of: date,
+) -> dict:
+    """Audit the exact SEC period pair used for one YoY calculation.
+
+    Missing pairs are REVIEW, not FAIL. FAIL is reserved for a structurally
+    suspicious pair that the engine actually used.
+    """
+    if not pair:
+        return {
+            "status": "REVIEW",
+            "gap_days": None,
+            "current_duration_days": None,
+            "prior_duration_days": None,
+            "issues": ["no comparable YoY pair available"],
+            "reviews": [],
+        }
+
+    current = pair.get("current_meta") or {}
+    prior = pair.get("prior_meta") or {}
+    gap_days = pair.get("gap_days")
+    curr_duration = current.get("duration_days")
+    prior_duration = prior.get("duration_days")
+
+    if period == "quarter":
+        lo, hi = 60, 120
+    elif period == "annual":
+        lo, hi = 300, 430
+    else:
+        raise ValueError("period must be quarter or annual")
+
+    issues = []
+    reviews = []
+
+    if gap_days is None:
+        reviews.append("YoY end-date gap unavailable")
+    elif not 320 <= int(gap_days) <= 410:
+        issues.append(f"YoY end-date gap {gap_days}d is outside 320–410d")
+
+    for label, duration in (
+        ("current", curr_duration),
+        ("prior", prior_duration),
+    ):
+        if duration is None:
+            reviews.append(f"{label} duration unavailable")
+        elif not lo <= int(duration) <= hi:
+            issues.append(
+                f"{label} {period} duration {duration}d is outside {lo}–{hi}d"
+            )
+
+    for label, meta in (("current", current), ("prior", prior)):
+        end_date = meta.get("end")
+        filed = meta.get("filed")
+        if isinstance(end_date, date) and end_date > as_of:
+            issues.append(f"{label} period ends in the future ({end_date})")
+        if isinstance(end_date, date) and isinstance(filed, date) and filed < end_date:
+            issues.append(
+                f"{label} filing date {filed} precedes period end {end_date}"
+            )
+        if not meta.get("accn"):
+            reviews.append(f"{label} accession number unavailable")
+        if not meta.get("form"):
+            reviews.append(f"{label} filing form unavailable")
+
+    status = "FAIL" if issues else "REVIEW" if reviews else "PASS"
+    return {
+        "status": status,
+        "gap_days": gap_days,
+        "current_duration_days": curr_duration,
+        "prior_duration_days": prior_duration,
+        "issues": issues,
+        "reviews": reviews,
+    }
+
+
+def _fiscal_calendar_label(*pairs: dict | None) -> str:
+    """Explain the most recent annual period end without assuming Dec FY."""
+    annual_end = None
+    for pair in pairs:
+        if not pair:
+            continue
+        meta = pair.get("current_meta") or {}
+        candidate = meta.get("end")
+        if isinstance(candidate, date):
+            annual_end = candidate
+            break
+
+    if annual_end is None:
+        return "UNKNOWN"
+    if annual_end.month == 12:
+        return "DECEMBER FY / CALENDAR-LIKE"
+    return annual_end.strftime("%B").upper() + " FY / NON-CALENDAR"
+
+
+def _metric_provenance_row(
+    metric: str,
+    *,
+    taxonomy: str | None,
+    concept: str | None,
+    unit: str | None,
+    pair: dict | None,
+    integrity: dict,
+) -> dict:
+    current = (pair or {}).get("current_meta") or {}
+    prior = (pair or {}).get("prior_meta") or {}
+    return {
+        "metric": metric,
+        "taxonomy": taxonomy or "—",
+        "concept": concept or "—",
+        "unit": unit or "—",
+        "current_period": (
+            f"{current.get('start')} → {current.get('end')}"
+            if current.get("start") and current.get("end")
+            else "—"
+        ),
+        "prior_period": (
+            f"{prior.get('start')} → {prior.get('end')}"
+            if prior.get("start") and prior.get("end")
+            else "—"
+        ),
+        "yoy_gap_days": integrity.get("gap_days"),
+        "current_duration_days": integrity.get("current_duration_days"),
+        "prior_duration_days": integrity.get("prior_duration_days"),
+        "current_form": current.get("form") or "—",
+        "prior_form": prior.get("form") or "—",
+        "current_filed": current.get("filed"),
+        "current_accn": current.get("accn") or "—",
+        "integrity": integrity.get("status", "REVIEW"),
+    }
+
+
+def _overall_metric_integrity(
+    *,
+    revenue_concept: str | None,
+    earnings_concept: str | None,
+    available_weight: float,
+    checks: dict,
+) -> tuple[str, str]:
+    """Combine structural checks without changing the fundamental score."""
+    used_failures = [
+        name for name, check in checks.items()
+        if check.get("status") == "FAIL"
+    ]
+    if used_failures:
+        return (
+            "FAIL",
+            "Structurally suspicious SEC period pairing: "
+            + ", ".join(used_failures),
+        )
+
+    review_items = [
+        name for name, check in checks.items()
+        if check.get("status") == "REVIEW"
+    ]
+    if not revenue_concept:
+        review_items.append("revenue concept unavailable")
+    if not earnings_concept:
+        review_items.append("earnings concept unavailable")
+    if available_weight < 80:
+        review_items.append(
+            f"metric coverage {available_weight:.0f}% is below 80%"
+        )
+
+    if review_items:
+        return (
+            "REVIEW",
+            "Manual/domain review required: " + "; ".join(review_items),
+        )
+
+    return (
+        "PASS",
+        "All used quarter/annual SEC period pairs passed structural integrity checks.",
+    )
+
+
 def build_fundamental_snapshot(
     ticker: str,
     companyfacts: dict,
@@ -1177,6 +1446,29 @@ def build_fundamental_snapshot(
     earn_q_growth = _latest_growth(earn_q, earnings=True)
     rev_a_growth = _latest_annual_growth(rev_a, earnings=False)
     earn_a_growth = _latest_annual_growth(earn_a, earnings=True)
+
+    metric_integrity_checks = {
+        "Revenue quarter": _metric_pair_integrity(
+            rev_q_growth.get("pair"),
+            period="quarter",
+            as_of=as_of,
+        ),
+        "Earnings quarter": _metric_pair_integrity(
+            earn_q_growth.get("pair"),
+            period="quarter",
+            as_of=as_of,
+        ),
+        "Revenue annual": _metric_pair_integrity(
+            rev_a_growth.get("pair"),
+            period="annual",
+            as_of=as_of,
+        ),
+        "Earnings annual": _metric_pair_integrity(
+            earn_a_growth.get("pair"),
+            period="annual",
+            as_of=as_of,
+        ),
+    }
 
     components = {
         "quarter_revenue": (
@@ -1235,6 +1527,53 @@ def build_fundamental_snapshot(
         if available_weight >= 60.0
         else np.nan
     )
+
+    metric_integrity_status, metric_integrity_summary = (
+        _overall_metric_integrity(
+            revenue_concept=revenue.get("concept"),
+            earnings_concept=earnings_source.get("concept"),
+            available_weight=available_weight,
+            checks=metric_integrity_checks,
+        )
+    )
+    fiscal_calendar = _fiscal_calendar_label(
+        rev_a_growth.get("pair"),
+        earn_a_growth.get("pair"),
+    )
+    metric_integrity_rows = [
+        _metric_provenance_row(
+            "Revenue quarter",
+            taxonomy=revenue.get("taxonomy"),
+            concept=revenue.get("concept"),
+            unit=revenue.get("unit"),
+            pair=rev_q_growth.get("pair"),
+            integrity=metric_integrity_checks["Revenue quarter"],
+        ),
+        _metric_provenance_row(
+            f"{earnings_metric} quarter",
+            taxonomy=earnings_source.get("taxonomy"),
+            concept=earnings_source.get("concept"),
+            unit=earnings_source.get("unit"),
+            pair=earn_q_growth.get("pair"),
+            integrity=metric_integrity_checks["Earnings quarter"],
+        ),
+        _metric_provenance_row(
+            "Revenue annual",
+            taxonomy=revenue.get("taxonomy"),
+            concept=revenue.get("concept"),
+            unit=revenue.get("unit"),
+            pair=rev_a_growth.get("pair"),
+            integrity=metric_integrity_checks["Revenue annual"],
+        ),
+        _metric_provenance_row(
+            f"{earnings_metric} annual",
+            taxonomy=earnings_source.get("taxonomy"),
+            concept=earnings_source.get("concept"),
+            unit=earnings_source.get("unit"),
+            pair=earn_a_growth.get("pair"),
+            integrity=metric_integrity_checks["Earnings annual"],
+        ),
+    ]
 
     latest_filed_candidates = [
         rev_q_growth.get("filed"),
@@ -1353,6 +1692,11 @@ def build_fundamental_snapshot(
         "fundamental_grade": _grade(score),
         "fundamental_confidence": confidence,
         "available_weight_pct": round(float(available_weight), 1),
+        "metric_integrity_status": metric_integrity_status,
+        "metric_integrity_summary": metric_integrity_summary,
+        "metric_integrity_checks": metric_integrity_checks,
+        "metric_integrity_rows": metric_integrity_rows,
+        "fiscal_calendar": fiscal_calendar,
         "latest_filed": latest_filed,
         "latest_filed_age_days": age_days,
         "revenue_taxonomy": revenue["taxonomy"],
@@ -1363,12 +1707,16 @@ def build_fundamental_snapshot(
         "earnings_unit": earnings_source["unit"],
         "earnings_metric": earnings_metric,
         "revenue_q_yoy": rev_q_growth["growth"],
+        "revenue_q_pair": rev_q_growth.get("pair"),
+        "revenue_q_prior_growth_pair": rev_q_growth.get("prior_growth_pair"),
         "revenue_q_end": rev_q_growth["end"],
         "revenue_q_prior_yoy": rev_q_growth["prior_growth"],
         "revenue_q_change": rev_q_growth["change"],
         "revenue_positive_count": rev_q_growth["positive_count"],
         "revenue_valid_count": rev_q_growth["valid_count"],
         "earnings_q_yoy": earn_q_growth["growth"],
+        "earnings_q_pair": earn_q_growth.get("pair"),
+        "earnings_q_prior_growth_pair": earn_q_growth.get("prior_growth_pair"),
         "earnings_q_state": earn_q_growth["state"],
         "earnings_q_end": earn_q_growth["end"],
         "earnings_q_prior_yoy": earn_q_growth["prior_growth"],
@@ -1376,9 +1724,11 @@ def build_fundamental_snapshot(
         "earnings_positive_count": earn_q_growth["positive_count"],
         "earnings_valid_count": earn_q_growth["valid_count"],
         "revenue_annual_yoy": rev_a_growth["growth"],
+        "revenue_annual_pair": rev_a_growth.get("pair"),
         "revenue_annual_state": rev_a_growth["state"],
         "revenue_annual_end": rev_a_growth["end"],
         "earnings_annual_yoy": earn_a_growth["growth"],
+        "earnings_annual_pair": earn_a_growth.get("pair"),
         "earnings_annual_state": earn_a_growth["state"],
         "earnings_annual_end": earn_a_growth["end"],
         "fundamental_reasons": "; ".join(reasons),
@@ -1425,6 +1775,11 @@ def unavailable_snapshot(
         "fundamental_grade": "N/A",
         "fundamental_confidence": "UNKNOWN",
         "available_weight_pct": 0.0,
+        "metric_integrity_status": "NOT AVAILABLE",
+        "metric_integrity_summary": str(reason),
+        "metric_integrity_checks": {},
+        "metric_integrity_rows": [],
+        "fiscal_calendar": "UNKNOWN",
         "latest_filed": None,
         "latest_filed_age_days": None,
         "revenue_q_yoy": np.nan,
