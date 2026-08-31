@@ -36,7 +36,8 @@ When proposing a feature, first ask: **Which roadmap stage does this belong to?*
 | V1.2.2.1a–V1.2.2.1b1 | SEC access / identity / Fair Access integrity | Complete / Frozen |
 | V1.2.3 | Composite Candidate Quality Integration — Shadow Calibration | Calibration captured / not frozen |
 | V1.2.3a | Composite Attribution & Incremental Fundamental Impact | Accepted / Frozen |
-| V1.2.3b | Composite Weight Robustness & Guardrail Calibration | **CURRENT / READY FOR LIVE ACCEPTANCE** |
+| V1.2.3b | Composite Weight Robustness & Guardrail Calibration | S&P evidence captured / precision fix required |
+| V1.2.3b1 | Full-Precision Robustness Integrity Fix | **CURRENT / READY FOR LIVE ACCEPTANCE** |
 | V1.3 | Entry Quality / Anti-Chase Engine | Planned |
 | V1.4 | Market Regime & Deployment Engine | Planned |
 | V1.5 | Earnings / Event Reliability Layer | Planned |
@@ -45,7 +46,7 @@ When proposing a feature, first ask: **Which roadmap stage does this belong to?*
 | V1.8 | Paper Trading & Trade Journal Integration | Planned |
 | V2.0 | Production-grade Daily Swing Scanner | Target |
 
-## Current Stage — V1.2.3b Composite Weight Robustness & Guardrail Calibration
+## Current Stage — V1.2.3b1 Full-Precision Robustness Integrity Fix
 
 ### Objective
 
@@ -219,3 +220,30 @@ The progress percentages describe implementation maturity, not expected trading 
   event-gate behavior and trade decisions.
 - No production Composite Quality weight or guardrail is selected until both
   50-name universe tests are reviewed.
+
+
+### V1.2.3b1 — Full-Precision Robustness Integrity Fix
+- Status: **READY FOR LIVE ACCEPTANCE**
+- Trigger: S&P 500 50-name V1.2.3b test showed tiny F10/F20/F30
+  Spearman differences between accepted 3D attribution and 3E robustness.
+- Root cause: the robustness layer reconstructed scenarios from the displayed
+  one-decimal No-Fund reference, introducing avoidable rounding contamination.
+- Fix discipline:
+  - F10/F20/F30 displayed scores and ranks are reused directly from the
+    accepted/frozen V1.2.3a attribution layer.
+  - Their exact formulas are independently recomputed only as an integrity
+    check; rounded scores must match the accepted anchors.
+  - New F05/F15/F25 interpolation scores use unrounded internal No-Fund values.
+  - F05/F15/F25 rankings use unrounded internal composite scores.
+  - Guardrail trigger decisions and guardrail rankings use unrounded exact
+    F20 incremental Fundamental impact.
+  - Display values remain rounded for readability.
+- No weight changes.
+- No guardrail changes or enforcement.
+- No changes to Candidate Quality, Leadership, Fundamental Quality,
+  Entry Quality, scanner buckets, event gates or trade decisions.
+- Acceptance sequence:
+  1. rerun S&P 500 STRICT with 50-name Fundamental sample;
+  2. confirm FULL-PRECISION INTEGRITY PASS;
+  3. confirm 3E F10/F20/F30 anchor metrics match 3D exactly;
+  4. only then run Russell 2000 with 50-name sample.

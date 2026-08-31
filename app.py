@@ -103,7 +103,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.3b"
+APP_VERSION = "V1.2.3b1"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -113,13 +113,14 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Composite Weight Robustness & Guardrail Calibration"
+    "• Trade With Edge • Candidate Quality Engine • Full-Precision Robustness Integrity"
 )
 st.caption(
-    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.3b Composite Weight "
-    "Robustness & Guardrail Calibration • V1.2.3a attribution is accepted/frozen • "
-    "Candidate Quality, Leadership, Fundamental Quality and Entry Quality remain "
-    "separate; official ranking, buckets and trade decisions remain unchanged"
+    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.3b1 Full-Precision "
+    "Robustness Integrity Fix • V1.2.3a attribution remains accepted/frozen • "
+    "V1.2.3b weights and guardrails remain shadow-only • Candidate Quality, "
+    "Leadership, Fundamental Quality, Entry Quality, official ranking, buckets "
+    "and trade decisions remain unchanged"
 )
 
 
@@ -590,7 +591,7 @@ def render_fundamental_batch_coverage(scan, sample_size):
     st.subheader("3C) Fundamental Universe Coverage — Shadow Batch")
     st.info(
         "V1.2.2.3 FROZEN FUNDAMENTAL REFERENCE: this bounded audited SEC sample "
-        "is the accepted input to V1.2.3b robustness calibration. It does NOT "
+        "is the accepted input to V1.2.3b1 full-precision robustness validation. It does NOT "
         "alter Candidate Quality, Leadership, Fundamental Quality, scanner "
         "ranking, candidate buckets, Entry Quality, or trade decisions."
     )
@@ -669,7 +670,7 @@ def render_fundamental_batch_coverage(scan, sample_size):
     st.caption(
         "Selection order = official Candidate Quality descending, then "
         "Leadership Score, then Legacy RS. This frozen V1.2.2.3 sample is the "
-        "audited input to V1.2.3b robustness calibration; official scanner order remains unchanged."
+        "audited input to V1.2.3b1 robustness validation; official scanner order remains unchanged."
     )
 
     st.divider()
@@ -955,6 +956,19 @@ def render_composite_robustness_calibration(batch_table):
         "F05/F15/F25 are interpolation points only."
     )
 
+    if summary.get("anchor_integrity_pass"):
+        st.success(
+            "FULL-PRECISION INTEGRITY PASS: F10/F20/F30 scores and ranks are "
+            "reused directly from the accepted V1.2.3a attribution layer. "
+            "F05/F15/F25 and guardrail simulations use unrounded internal "
+            "No-Fund / composite values for new ranking calculations."
+        )
+    else:
+        st.error(
+            "FULL-PRECISION INTEGRITY FAIL: a V1.2.3a anchor mismatch was detected. "
+            "Do not use this robustness result for calibration."
+        )
+
     m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric(
         "Rankable",
@@ -985,6 +999,11 @@ def render_composite_robustness_calibration(batch_table):
     )
 
     st.markdown("**Weight robustness grid**")
+    st.caption(
+        "F10/F20/F30 are frozen V1.2.3a anchor scenarios. F05/F15/F25 are "
+        "new full-precision interpolation scenarios. All rows compare against "
+        "the same accepted No-Fund reference."
+    )
     weight_summary = pd.DataFrame(summary.get("weight_summary", []))
     if not weight_summary.empty:
         st.dataframe(
@@ -1084,6 +1103,7 @@ def render_composite_robustness_calibration(batch_table):
                         "technical_leadership_reference",
                         "shadow_f20",
                         "f20_fund_score_impact_pts",
+                        "f20_fund_score_impact_exact_pts",
                         "guard_f20_cap6",
                         "rank_f20",
                         "guard_rank_cap6",
