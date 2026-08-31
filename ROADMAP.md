@@ -13,6 +13,7 @@ Find high-quality U.S. swing-trade candidates, but act only when the **entry its
 3. **No silent fallback.** Critical data/source failures must be surfaced explicitly.
 4. **NO TRADE is valid.** Never weaken thresholds just to populate the candidate list.
 5. **Every enhancement must improve edge, risk control, data confidence, or explainability.** Otherwise it does not belong in the scanner.
+6. **No major freeze without a development record.** Update the Development Chronicle and any major Architecture Decision Record before declaring a major stage frozen.
 
 When proposing a feature, first ask: **Which roadmap stage does this belong to?**
 
@@ -37,8 +38,9 @@ When proposing a feature, first ask: **Which roadmap stage does this belong to?*
 | V1.2.3 | Composite Candidate Quality Integration — Shadow Calibration | Calibration captured / not frozen |
 | V1.2.3a | Composite Attribution & Incremental Fundamental Impact | Accepted / Frozen |
 | V1.2.3b | Composite Weight Robustness & Guardrail Calibration | S&P evidence captured / precision fix required |
-| V1.2.3b1 | Full-Precision Robustness Integrity Fix | S&P 500 accepted / frozen |
-| V1.2.3b2 | Pre-Revenue / Zero-Revenue Domain Integrity | **CURRENT / READY FOR LIVE ACCEPTANCE** |
+| V1.2.3b1 | Full-Precision Robustness Integrity Fix | Accepted / Frozen |
+| V1.2.3b2 | Pre-Revenue / Zero-Revenue Domain Integrity | Accepted / Frozen |
+| V1.2.3c | Composite Architecture Selection & Explainable Guardrail Layer | **ARCHITECTURE SELECTED / IMPLEMENTATION NEXT** |
 | V1.3 | Entry Quality / Anti-Chase Engine | Planned |
 | V1.4 | Market Regime & Deployment Engine | Planned |
 | V1.5 | Earnings / Event Reliability Layer | Planned |
@@ -47,43 +49,52 @@ When proposing a feature, first ask: **Which roadmap stage does this belong to?*
 | V1.8 | Paper Trading & Trade Journal Integration | Planned |
 | V2.0 | Production-grade Daily Swing Scanner | Target |
 
-## Current Stage — V1.2.3b2 Pre-Revenue / Zero-Revenue Domain Integrity
+## Current Stage — V1.2.3c Composite Architecture Selection & Explainable Guardrail Layer
 
-### Objective
+### Architecture decision
 
-Calibrate how **Technical Candidate Quality + Leadership + Fundamental Quality**
-should work together without hiding the separate subscores and without
-contaminating Entry Quality.
+The completed S&P 500 and Russell 2000 calibration selects **F15** as the primary Composite Quality architecture candidate:
 
-### Shadow-calibration scope
+- Internal formula: **59.5% Candidate Quality + 25.5% Leadership + 15% Fundamental Quality**.
+- Equivalent construction: `85% × (70% CQ + 30% Leadership) + 15% Fundamental`.
+- **F20 remains a shadow sensitivity benchmark.**
+- **No hard ±6/±8 score cap is selected** for the initial V1.2.3c implementation.
+- Instead, expose incremental Fundamental impact as:
+  - NORMAL: `|impact| < 4 pts`;
+  - MATERIAL: `4–6 pts`;
+  - HIGH IMPACT: `>6 pts`.
+- REVIEW/FAIL/unavailable fundamentals remain unranked for full Composite; no neutral/average imputation.
+- Candidate Quality, Leadership, Fundamental Quality, Composite Quality and Entry Quality remain separately visible.
+- Initial V1.2.3c remains **shadow-only**: no official scanner ordering, bucket, Entry Quality or trade-decision changes.
 
-- Official Candidate Quality remains frozen and separately visible.
-- Leadership remains frozen and separately visible.
-- Fundamental Quality remains frozen and separately visible.
-- Entry Quality remains completely separate from candidate desirability.
-- No-Fund reference: **70% Candidate Quality + 30% Leadership**.
-- Compare three Fundamental Quality scenarios:
-  - F10: 63% Candidate Quality + 27% Leadership + 10% Fundamental.
-  - F20: 56% Candidate Quality + 24% Leadership + 20% Fundamental.
-  - F30: 49% Candidate Quality + 21% Leadership + 30% Fundamental.
-- F20 is the primary shadow comparison, **not a final production weight**.
-- REVIEW/FAIL/unavailable fundamentals are never imputed.
-- Measure rank correlation, Top-10 overlap, rank shifts, score impact,
-  scenario sensitivity and descriptive technical/fundamental alignment.
-- No scanner gate, bucket, Entry Quality or trade-decision changes.
+### Why F15
 
-### Boundary with V1.5
+F15 preserved the same Top-10 overlap as F20 in both 50-name samples while reducing score/rank disruption. Cross-universe Spearman was also much more stable:
 
-V1.2.2 measures **reported business performance**.
+- S&P 500: F15 **0.783** vs F20 **0.590**.
+- Russell 2000: F15 **0.790** vs F20 **0.723**.
 
-V1.5 remains responsible for **event timing/reliability**, including the next earnings date and fail-closed event-risk handling.
+### V1.2.3b2 live acceptance now complete
+
+Russell 2000 Fundamental sample = 50:
+
+- CompanyFacts PASS: **50**
+- Integrity PASS: **45**
+- REVIEW: **5**
+- FAIL: **0**
+- Usable coverage: **90.0%**
+- SRRK: corrected from hard FAIL to explainable REVIEW; no fabricated annual YoY.
+
+### Documentation control
+
+The new authoritative history file is `ALPACA_SCANNER_DEVELOPMENT_CHRONICLE.md`. Major architecture decisions are supported by ADRs under `docs/architecture/`. V1.2.3c is the first new phase that must be documented under this standard from implementation through freeze.
 
 ## Progress Snapshot
 
 - Foundation: `████████████████████` 100%
 - Market-data integrity: `███████████████████░` 95%
 - Scanner auditability: `████████████████████` 100%
-- Candidate intelligence: `█████████████████░░░` 85% — technical, leadership and fundamental layers are frozen; composite integration is now in shadow calibration
+- Candidate intelligence: `█████████████████░░░` 85% — technical, leadership and fundamental layers are frozen; F15 composite architecture is selected and pending V1.2.3c shadow implementation
 - Entry intelligence: `████████░░░░░░░░░░░░` 40%
 - Fundamental-performance intelligence: `██████████████████░░` 90% — single-ticker integrity and representative bounded-universe coverage accepted/frozen
 - Event-date confidence: `██░░░░░░░░░░░░░░░░░░` 10%
@@ -94,7 +105,7 @@ The progress percentages describe implementation maturity, not expected trading 
 
 
 ### V1.2.2.1b — SEC Identity Transport Bypass
-- Status: **READY FOR LIVE ACCEPTANCE**
+- Status: **SUPERSEDED / RESOLVED BY V1.2.2.1b1**
 - Scope: ticker→CIK transport only; financial values remain official SEC CompanyFacts.
 - Reason: Streamlit Cloud live test returned HTTP 403 from all www.sec.gov identity endpoints.
 - Frozen: Candidate Quality, Leadership, Entry Quality, scanner gates, buckets, trade decisions.
@@ -153,7 +164,7 @@ The progress percentages describe implementation maturity, not expected trading 
 
 
 ### V1.2.3 — Composite Candidate Quality Integration — Shadow Calibration
-- Status: **READY FOR LIVE ACCEPTANCE**
+- Status: **CALIBRATION CAPTURED / SUPERSEDED BY V1.2.3a–c REFINEMENT**
 - No-Fund reference = 70% official Candidate Quality + 30% Leadership.
 - F10 = 63% Candidate Quality + 27% Leadership + 10% Fundamental.
 - F20 = 56% Candidate Quality + 24% Leadership + 20% Fundamental.
@@ -170,7 +181,7 @@ The progress percentages describe implementation maturity, not expected trading 
 
 
 ### V1.2.3a — Composite Attribution & Incremental Fundamental Impact
-- Status: **READY FOR LIVE ACCEPTANCE**
+- Status: **ACCEPTED / FROZEN**
 - Narrow attribution refinement; V1.2.3 F10/F20/F30 formulas are unchanged.
 - Separates Leadership impact from incremental Fundamental impact.
 - Leadership rank impact = Official Candidate Quality rank → No-Fund rank.
@@ -190,7 +201,7 @@ The progress percentages describe implementation maturity, not expected trading 
 
 
 ### V1.2.3b — Composite Weight Robustness & Guardrail Calibration
-- Status: **READY FOR LIVE ACCEPTANCE**
+- Status: **RESEARCH COMPLETED / PRECISION DEFECT REPAIRED BY V1.2.3b1**
 - V1.2.3a attribution is accepted/frozen and remains the authority for separating
   Leadership impact from incremental Fundamental impact.
 - This stage does **not** merge or overwrite Candidate Quality, Leadership,
@@ -224,7 +235,7 @@ The progress percentages describe implementation maturity, not expected trading 
 
 
 ### V1.2.3b1 — Full-Precision Robustness Integrity Fix
-- Status: **READY FOR LIVE ACCEPTANCE**
+- Status: **ACCEPTED / FROZEN**
 - Trigger: S&P 500 50-name V1.2.3b test showed tiny F10/F20/F30
   Spearman differences between accepted 3D attribution and 3E robustness.
 - Root cause: the robustness layer reconstructed scenarios from the displayed
@@ -251,20 +262,47 @@ The progress percentages describe implementation maturity, not expected trading 
 
 
 ### V1.2.3b2 — Pre-Revenue / Zero-Revenue Domain Integrity
-- Status: **READY FOR LIVE ACCEPTANCE**
-- Trigger: Russell 2000 50-name sample exposed a hard `FAIL` on a sparse annual
-  revenue history (`Structurally suspicious SEC period pairing: Revenue annual`).
-- Generic fix — no ticker-specific rule:
-  - latest annual fact remains the current endpoint;
-  - prior-year comparator must end 320–410 days earlier;
-  - older/non-consecutive revenue history is blocked, never silently substituted;
-  - if a valid prior-year comparator is absent, annual YoY becomes N/A + REVIEW;
-  - if latest annual revenue is zero in that condition, state is explicitly
-    `NO CURRENT REVENUE`;
-  - genuine malformed current pairs remain hard FAIL.
-- No changes to Candidate Quality, Leadership, Fundamental Quality weights,
-  Composite Quality weights, guardrail candidates, Entry Quality, official
-  ranking, buckets, event gates or trade decisions.
-- Acceptance: rerun Russell 2000 STRICT with Fundamental sample = 50; the sparse
-  zero-revenue issuer should become REVIEW, and the hard FAIL count should fall
-  to zero if it was the sole failure.
+- Status: **ACCEPTED / FROZEN**
+- Trigger: Russell 2000 50-name robustness sample exposed SRRK as a hard FAIL:
+  `Structurally suspicious SEC period pairing: Revenue annual`.
+- Root cause class: annual YoY logic previously paired the last two annual
+  observations merely because they were adjacent rows. Sparse revenue history
+  can therefore create a non-consecutive pair (for example 2024 vs 2022).
+- Integrity fix:
+  - the actual latest annual fact is still the required current endpoint;
+  - its comparator must be a genuine prior-year fact with a 320–410 day gap;
+  - if no valid comparator exists, annual YoY is N/A and the metric becomes
+    explainable REVIEW;
+  - non-consecutive/stale historical revenue is never substituted;
+  - zero latest annual revenue receives explicit `NO CURRENT REVENUE` state
+    when no valid YoY comparator exists;
+  - genuine current structural defects (future period, filing before period
+    end, etc.) remain hard FAIL.
+- This is generic domain integrity; there is **no ticker-specific SRRK rule**.
+- No changes to:
+  - Candidate Quality;
+  - Leadership;
+  - Fundamental Quality scoring weights;
+  - V1.2.3a composite weights;
+  - V1.2.3b guardrail candidates;
+  - Entry Quality;
+  - official ranking, buckets, event gates or trade decisions.
+- Live acceptance result:
+  - Russell 2000 STRICT, Fundamental sample = 50.
+  - CompanyFacts PASS = 50.
+  - Integrity PASS = 45; REVIEW = 5; FAIL = 0.
+  - Usable coverage = 90.0%.
+  - SRRK class = REVIEW, not FAIL; no fabricated annual YoY.
+  - Russell 3D/3E robustness evidence completed after the fix.
+
+
+### V1.2.3c — Composite Architecture Selection & Explainable Guardrail Layer
+- Status: **ARCHITECTURE SELECTED / IMPLEMENTATION NEXT**
+- Primary Composite candidate: **F15** = 59.5% Candidate Quality + 25.5% Leadership + 15% Fundamental Quality.
+- F20 remains shadow sensitivity benchmark.
+- No hard Fundamental-impact cap is selected initially.
+- Proposed explainability states: NORMAL <4 pts; MATERIAL 4–6 pts; HIGH IMPACT >6 pts absolute Fundamental contribution.
+- REVIEW/FAIL/unavailable Fundamental Quality is never imputed and receives no full Composite rank.
+- Initial implementation remains shadow-only and cannot change official Candidate Quality, scanner ranking, buckets, Entry Quality, event gates or trade decisions.
+- Architecture rationale and limitations are recorded in `docs/architecture/ADR-001-composite-quality-f15.md`.
+- Full history and validation evidence are recorded in `ALPACA_SCANNER_DEVELOPMENT_CHRONICLE.md`.
