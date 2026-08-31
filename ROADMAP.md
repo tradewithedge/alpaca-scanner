@@ -28,12 +28,13 @@ When proposing a feature, first ask: **Which roadmap stage does this belong to?*
 | V1.2.1 | Relative Leadership & Market-Stress Resilience | Complete / Frozen |
 | V1.2.1.1 | Leadership explainability | Complete / Frozen |
 | V1.2.1.2–V1.2.1.3c | Ticker Inspector utility/reference engine | Complete / Frozen |
-| V1.2.2 | Fundamental Quality Engine | **CURRENT** |
-| V1.2.2.3 | Fundamental Universe Coverage & Cache Validation | **CURRENT / READY FOR LIVE ACCEPTANCE** |
+| V1.2.2 | Fundamental Quality Engine | Complete / Frozen |
+| V1.2.2.3 | Fundamental Universe Coverage & Cache Validation | Complete / Frozen |
 | V1.2.2.2 | Fundamental Metric Integrity & Cross-Company Validation | Complete / Frozen |
 | V1.2.2.2a–V1.2.2.2a1 | Concept continuity + annual horizon integrity | Complete / Frozen |
 | V1.2.2.1 | Revenue & Earnings Growth — shadow validation | Complete / superseded |
 | V1.2.2.1a–V1.2.2.1b1 | SEC access / identity / Fair Access integrity | Complete / Frozen |
+| V1.2.3 | Composite Candidate Quality Integration — Shadow Calibration | **CURRENT** |
 | V1.3 | Entry Quality / Anti-Chase Engine | Planned |
 | V1.4 | Market Regime & Deployment Engine | Planned |
 | V1.5 | Earnings / Event Reliability Layer | Planned |
@@ -42,25 +43,30 @@ When proposing a feature, first ask: **Which roadmap stage does this belong to?*
 | V1.8 | Paper Trading & Trade Journal Integration | Planned |
 | V2.0 | Production-grade Daily Swing Scanner | Target |
 
-## Current Stage — V1.2.2.3 Fundamental Universe Coverage & Cache Validation
+## Current Stage — V1.2.3 Composite Candidate Quality Integration — Shadow Calibration
 
 ### Objective
 
-Determine whether a technically strong stock is also backed by durable business growth.
+Calibrate how **Technical Candidate Quality + Leadership + Fundamental Quality**
+should work together without hiding the separate subscores and without
+contaminating Entry Quality.
 
-### First validation scope
+### Shadow-calibration scope
 
-- Official SEC EDGAR CompanyFacts only.
-- Latest-quarter revenue YoY growth.
-- Latest-quarter earnings YoY growth, preferring diluted EPS and explicitly disclosing a net-income fallback.
-- Revenue and earnings growth acceleration/deceleration using real numeric changes.
-- Recent positive YoY growth consistency.
-- Latest fiscal-year revenue and earnings growth as longer-term confirmation.
-- Fundamental Quality Score / Grade in **SHADOW MODE**.
-- Explicit Fundamental Data Confidence: HIGH / MEDIUM / LOW / UNKNOWN.
-- Ticker Inspector and selected Candidate Detail receive the same explainable view.
-- No batch fundamental fetch across the universe yet.
-- No change to Persistent Quality, Candidate Quality, Leadership, Entry Quality, buckets, or trade decisions until validation is complete.
+- Official Candidate Quality remains frozen and separately visible.
+- Leadership remains frozen and separately visible.
+- Fundamental Quality remains frozen and separately visible.
+- Entry Quality remains completely separate from candidate desirability.
+- No-Fund reference: **70% Candidate Quality + 30% Leadership**.
+- Compare three Fundamental Quality scenarios:
+  - F10: 63% Candidate Quality + 27% Leadership + 10% Fundamental.
+  - F20: 56% Candidate Quality + 24% Leadership + 20% Fundamental.
+  - F30: 49% Candidate Quality + 21% Leadership + 30% Fundamental.
+- F20 is the primary shadow comparison, **not a final production weight**.
+- REVIEW/FAIL/unavailable fundamentals are never imputed.
+- Measure rank correlation, Top-10 overlap, rank shifts, score impact,
+  scenario sensitivity and descriptive technical/fundamental alignment.
+- No scanner gate, bucket, Entry Quality or trade-decision changes.
 
 ### Boundary with V1.5
 
@@ -73,9 +79,9 @@ V1.5 remains responsible for **event timing/reliability**, including the next ea
 - Foundation: `████████████████████` 100%
 - Market-data integrity: `███████████████████░` 95%
 - Scanner auditability: `████████████████████` 100%
-- Candidate intelligence: `████████████████░░░░` 80% — leadership and single-ticker fundamentals validated; universe-level fundamental coverage now in shadow validation
+- Candidate intelligence: `█████████████████░░░` 85% — technical, leadership and fundamental layers are frozen; composite integration is now in shadow calibration
 - Entry intelligence: `████████░░░░░░░░░░░░` 40%
-- Fundamental-performance intelligence: `███████████████░░░░░` 75% after metric-integrity freeze; bounded universe coverage/cache validation in progress
+- Fundamental-performance intelligence: `██████████████████░░` 90% — single-ticker integrity and representative bounded-universe coverage accepted/frozen
 - Event-date confidence: `██░░░░░░░░░░░░░░░░░░` 10%
 - Validation/backtesting: `░░░░░░░░░░░░░░░░░░░░` 0%
 - Paper execution/journal: `░░░░░░░░░░░░░░░░░░░░` 0%
@@ -130,7 +136,7 @@ The progress percentages describe implementation maturity, not expected trading 
 
 
 ### V1.2.2.3 — Fundamental Universe Coverage & Cache Validation
-- Status: **READY FOR LIVE ACCEPTANCE**
+- Status: **ACCEPTED / FROZEN**
 - Purpose: prove that the validated single-ticker SEC Fundamental Quality engine can scale across a bounded set of persistent-quality scanner candidates without corrupting scanner state.
 - Fetch scope is intentionally bounded to the highest official Candidate Quality names after the existing persistent-quality gate; raw-universe batch fetching is prohibited.
 - Candidate selection uses only frozen official scanner fields (Candidate Quality, Leadership, Legacy RS). Fundamental Quality cannot influence its own validation sample.
@@ -140,3 +146,20 @@ The progress percentages describe implementation maturity, not expected trading 
 - Fundamental Quality remains SHADOW MODE.
 - Frozen: official Candidate Quality, Persistent Quality, Leadership score definition, Entry Quality, anti-chase rules, candidate buckets and trade decisions.
 - Only after V1.2.2.3 acceptance should the roadmap advance to **V1.2.3 Composite Candidate Quality Integration — Shadow Calibration**.
+
+
+### V1.2.3 — Composite Candidate Quality Integration — Shadow Calibration
+- Status: **READY FOR LIVE ACCEPTANCE**
+- No-Fund reference = 70% official Candidate Quality + 30% Leadership.
+- F10 = 63% Candidate Quality + 27% Leadership + 10% Fundamental.
+- F20 = 56% Candidate Quality + 24% Leadership + 20% Fundamental.
+- F30 = 49% Candidate Quality + 21% Leadership + 30% Fundamental.
+- F20 is a calibration reference only, not a production commitment.
+- REVIEW/FAIL/unavailable fundamentals are never imputed and cannot receive
+  a full composite rank.
+- Dashboard measures Top-10 overlap, Spearman correlation, rank shifts,
+  fundamental impact and scenario sensitivity.
+- Frozen throughout: official Candidate Quality, Leadership definition,
+  Entry Quality, anti-chase rules, buckets, event-gate behavior and trade decisions.
+- Promotion requires multi-universe live calibration and an explicit
+  weighting/gating decision. No automatic promotion is permitted.
