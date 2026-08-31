@@ -9,14 +9,18 @@ from scanner.composite_quality import (
 )
 
 
-class CompositeQualityTests(unittest.TestCase):
+class CompositeQualityAttributionTests(unittest.TestCase):
     def sample(self):
+        # Designed so BRZE_LIKE demonstrates the exact real-world ambiguity:
+        # Official rank 4 -> No-Fund rank 1 (Leadership promotion)
+        # No-Fund rank 1 -> F20 rank 3 (Fundamental demotion)
+        # Official rank 4 -> F20 rank 3 (net promotion still positive)
         return pd.DataFrame(
             [
                 {
-                    "symbol": "AAA",
+                    "symbol": "FULL",
                     "official_candidate_quality": 96.0,
-                    "leadership_score": 90.0,
+                    "leadership_score": 80.0,
                     "fundamental_score": 90.0,
                     "fundamental_confidence": "HIGH",
                     "metric_integrity": "PASS",
@@ -24,18 +28,48 @@ class CompositeQualityTests(unittest.TestCase):
                     "batch_status": "PASS",
                 },
                 {
-                    "symbol": "BBB",
+                    "symbol": "TECH1",
                     "official_candidate_quality": 95.0,
-                    "leadership_score": 88.0,
-                    "fundamental_score": 40.0,
+                    "leadership_score": 70.0,
+                    "fundamental_score": 70.0,
                     "fundamental_confidence": "HIGH",
                     "metric_integrity": "PASS",
                     "companyfacts": "PASS",
                     "batch_status": "PASS",
                 },
                 {
-                    "symbol": "CCC",
+                    "symbol": "TECH2",
                     "official_candidate_quality": 94.0,
+                    "leadership_score": 72.0,
+                    "fundamental_score": 70.0,
+                    "fundamental_confidence": "HIGH",
+                    "metric_integrity": "PASS",
+                    "companyfacts": "PASS",
+                    "batch_status": "PASS",
+                },
+                {
+                    "symbol": "BRZE_LIKE",
+                    "official_candidate_quality": 92.0,
+                    "leadership_score": 99.0,
+                    "fundamental_score": 45.0,
+                    "fundamental_confidence": "HIGH",
+                    "metric_integrity": "PASS",
+                    "companyfacts": "PASS",
+                    "batch_status": "PASS",
+                },
+                {
+                    "symbol": "FUND_STRONG",
+                    "official_candidate_quality": 91.0,
+                    "leadership_score": 70.0,
+                    "fundamental_score": 100.0,
+                    "fundamental_confidence": "HIGH",
+                    "metric_integrity": "PASS",
+                    "companyfacts": "PASS",
+                    "batch_status": "PASS",
+                },
+                {
+                    "symbol": "REVIEW",
+                    "official_candidate_quality": 93.0,
                     "leadership_score": 85.0,
                     "fundamental_score": np.nan,
                     "fundamental_confidence": "UNKNOWN",
@@ -46,68 +80,121 @@ class CompositeQualityTests(unittest.TestCase):
             ]
         )
 
-    def test_no_fund_reference_is_70_30(self):
+    def test_formulas_are_unchanged_from_v123(self):
         out = build_shadow_composite_table(self.sample())
-        aaa = out[out["symbol"] == "AAA"].iloc[0]
+        row = out[out["symbol"] == "FULL"].iloc[0]
+
         self.assertAlmostEqual(
-            aaa["technical_leadership_reference"],
-            0.70 * 96.0 + 0.30 * 90.0,
+            row["technical_leadership_reference"],
+            0.70 * 96.0 + 0.30 * 80.0,
+            places=1,
+        )
+        self.assertAlmostEqual(
+            row["shadow_f10"],
+            0.63 * 96.0 + 0.27 * 80.0 + 0.10 * 90.0,
+            places=1,
+        )
+        self.assertAlmostEqual(
+            row["shadow_f20"],
+            0.56 * 96.0 + 0.24 * 80.0 + 0.20 * 90.0,
+            places=1,
+        )
+        self.assertAlmostEqual(
+            row["shadow_f30"],
+            0.49 * 96.0 + 0.21 * 80.0 + 0.30 * 90.0,
             places=1,
         )
 
-    def test_f20_is_56_24_20(self):
+    def test_review_fundamentals_remain_unranked_and_unimputed(self):
         out = build_shadow_composite_table(self.sample())
-        aaa = out[out["symbol"] == "AAA"].iloc[0]
-        expected = 0.56 * 96.0 + 0.24 * 90.0 + 0.20 * 90.0
-        self.assertAlmostEqual(aaa["shadow_f20"], expected, places=1)
+        row = out[out["symbol"] == "REVIEW"].iloc[0]
 
-    def test_weak_fundamentals_demote_without_overwriting_official_quality(self):
-        source = self.sample()
-        original = source.copy(deep=True)
-        out = build_shadow_composite_table(source)
-        bbb = out[out["symbol"] == "BBB"].iloc[0]
-        self.assertEqual(bbb["official_candidate_quality"], 95.0)
-        self.assertLess(
-            bbb["shadow_f20"],
-            bbb["technical_leadership_reference"],
-        )
-        pd.testing.assert_frame_equal(source, original)
+        self.assertTrue(np.isnan(row["shadow_f20"]))
+        self.assertTrue(np.isnan(row["f20_rank"]))
+        self.assertTrue(np.isnan(row["f20_fund_rank_impact"]))
+        self.assertIn("REVIEW", row["quality_profile"])
 
-    def test_review_fundamentals_are_not_imputed(self):
+    def test_leadership_and_fundamental_score_impacts_are_separate(self):
         out = build_shadow_composite_table(self.sample())
-        ccc = out[out["symbol"] == "CCC"].iloc[0]
-        self.assertTrue(np.isnan(ccc["shadow_f10"]))
-        self.assertTrue(np.isnan(ccc["shadow_f20"]))
-        self.assertTrue(np.isnan(ccc["shadow_f30"]))
-        self.assertIn("REVIEW", ccc["quality_profile"])
+        row = out[out["symbol"] == "BRZE_LIKE"].iloc[0]
 
-    def test_full_alignment_profile(self):
+        self.assertGreater(row["leadership_score_impact_pts"], 0)
+        self.assertLess(row["f20_fund_score_impact_pts"], 0)
+
+    def test_brze_like_case_is_net_promoted_but_fundamentally_demoted(self):
         out = build_shadow_composite_table(self.sample())
-        aaa = out[out["symbol"] == "AAA"].iloc[0]
-        self.assertEqual(aaa["quality_profile"], "FULL ALIGNMENT")
+        row = out[out["symbol"] == "BRZE_LIKE"].iloc[0]
 
-    def test_technical_led_weak_fundamentals_profile(self):
+        self.assertGreater(row["leadership_rank_impact"], 0)
+        self.assertLess(row["f20_fund_rank_impact"], 0)
+        self.assertGreater(row["net_f20_rank_change"], 0)
+
+    def test_fundamental_strong_name_is_promoted_from_nofund(self):
         out = build_shadow_composite_table(self.sample())
-        bbb = out[out["symbol"] == "BBB"].iloc[0]
-        self.assertEqual(
-            bbb["quality_profile"],
-            "TECHNICAL-LED / WEAK FUNDAMENTALS",
-        )
+        row = out[out["symbol"] == "FUND_STRONG"].iloc[0]
 
-    def test_summary_excludes_review_from_full_rank(self):
+        self.assertGreater(row["f20_fund_score_impact_pts"], 0)
+        self.assertGreater(row["f20_fund_rank_impact"], 0)
+
+    def test_net_rank_change_equals_official_to_f20(self):
+        out = build_shadow_composite_table(self.sample())
+        rankable = out[out["shadow_f20"].notna()]
+
+        for _, row in rankable.iterrows():
+            self.assertEqual(
+                row["net_f20_rank_change"],
+                row["official_rank"] - row["f20_rank"],
+            )
+
+    def test_fundamental_rank_impact_equals_nofund_to_f20(self):
+        out = build_shadow_composite_table(self.sample())
+        rankable = out[out["shadow_f20"].notna()]
+
+        for _, row in rankable.iterrows():
+            self.assertEqual(
+                row["f20_fund_rank_impact"],
+                row["no_fund_rank"] - row["f20_rank"],
+            )
+
+    def test_summary_contains_incremental_scenario_attribution(self):
         out = build_shadow_composite_table(self.sample())
         summary = summarize_shadow_composite(out)
-        self.assertEqual(summary["total"], 3)
-        self.assertEqual(summary["rankable"], 2)
-        self.assertEqual(summary["unranked_fundamental_review"], 1)
-        self.assertEqual(summary["full_alignment"], 1)
 
-    def test_fundamental_sensitivity_increases_for_weak_fundamentals(self):
+        self.assertEqual(summary["rankable"], 5)
+        self.assertEqual(summary["unranked_fundamental_review"], 1)
+        self.assertEqual(
+            [r["scenario"] for r in summary["scenario_summary"]],
+            ["F10", "F20", "F30"],
+        )
+
+        for row in summary["scenario_summary"]:
+            self.assertIn("No-Fund Top-10 overlap", row)
+            self.assertIn("Spearman vs No-Fund", row)
+            self.assertIn("Median |fund rank impact|", row)
+            self.assertIn("Mean |fund score impact|", row)
+
+    def test_source_dataframe_is_not_mutated(self):
+        source = self.sample()
+        original = source.copy(deep=True)
+        build_shadow_composite_table(source)
+        pd.testing.assert_frame_equal(source, original)
+
+    def test_backward_compatibility_aliases_remain_consistent(self):
         out = build_shadow_composite_table(self.sample())
-        bbb = out[out["symbol"] == "BBB"].iloc[0]
-        self.assertGreater(bbb["shadow_f10"], bbb["shadow_f20"])
-        self.assertGreater(bbb["shadow_f20"], bbb["shadow_f30"])
-        self.assertGreater(bbb["scenario_spread_pts"], 0)
+        rankable = out[out["shadow_f20"].notna()]
+
+        self.assertTrue(
+            (
+                rankable["rank_change"]
+                == rankable["net_f20_rank_change"]
+            ).all()
+        )
+        self.assertTrue(
+            (
+                rankable["shadow_f20_rank"]
+                == rankable["f20_rank"]
+            ).all()
+        )
 
 
 if __name__ == "__main__":
