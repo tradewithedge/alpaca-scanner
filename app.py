@@ -24,6 +24,7 @@ import scanner.composite_quality as composite_quality_module
 import scanner.composite_robustness as composite_robustness_module
 import scanner.composite_architecture as composite_architecture_module
 import scanner.leadership as leadership_module
+import scanner.volume_quality as volume_quality_module
 import scanner.regime as regime_module
 import scanner.scoring as scoring_module
 import scanner.universe as universe_module
@@ -40,6 +41,7 @@ for _module in (
     composite_robustness_module,
     composite_architecture_module,
     leadership_module,
+    volume_quality_module,
     regime_module,
     scoring_module,
     universe_module,
@@ -95,6 +97,8 @@ summarize_composite_robustness = composite_robustness_module.summarize_composite
 build_selected_composite_table = composite_architecture_module.build_selected_composite_table
 summarize_selected_composite = composite_architecture_module.summarize_selected_composite
 add_leadership_features = leadership_module.add_leadership_features
+build_contextual_volume_quality = volume_quality_module.build_contextual_volume_quality
+summarize_contextual_volume_quality = volume_quality_module.summarize_contextual_volume_quality
 aggregate_regime = regime_module.aggregate_regime
 with_breadth = regime_module.with_breadth
 build_cross_section = scoring_module.build_cross_section
@@ -107,7 +111,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.2.3c"
+APP_VERSION = "V1.3a"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -117,13 +121,13 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • Candidate Quality Engine • Composite Architecture Selection & Explainable Guardrail"
+    "• Trade With Edge • V1.2.3c frozen Candidate/Composite baseline • V1.3a Contextual Volume Diagnostics"
 )
 st.caption(
-    "Roadmap stage: V1.2 Candidate Quality Engine → V1.2.3c Composite Architecture "
-    "Selection • F15 selected in SHADOW MODE: 59.5% Candidate Quality + 25.5% "
-    "Leadership + 15% Fundamental Quality • F20 remains a sensitivity benchmark • "
-    "No hard impact cap • official ranking, buckets, Entry Quality and trade decisions remain unchanged"
+    "Roadmap stage: V1.3a Contextual Volume Quality Engine • SHADOW ONLY • "
+    "price structure is classified before volume is interpreted • completed-session "
+    "SIP evidence only • V1.2.3c F15 (59.5% CQ + 25.5% Leadership + 15% Fundamental) "
+    "remains frozen • no change to official Candidate Quality, Entry Quality, ranking, buckets or trade decisions"
 )
 
 
@@ -1290,6 +1294,162 @@ def render_selected_composite_architecture(batch_table):
     )
 
 
+def render_contextual_volume_quality(scan):
+    """Render V1.3a completed-session contextual volume diagnostics, shadow only."""
+    st.subheader("3G) Contextual Volume Quality — Shadow Diagnostics")
+    st.info(
+        "V1.3a SHADOW MODE: price structure is identified independently first; "
+        "volume is then evaluated for context-specific confirmation or conflict. "
+        "Only completed consolidated SIP daily bars are used. This layer does NOT "
+        "change Candidate Quality, F15 Composite, Entry Quality, official ranking, "
+        "candidate buckets or trade decisions."
+    )
+
+    table = scan.get("volume_shadow")
+    summary = scan.get("volume_shadow_summary") or {}
+    official_ok = bool(scan.get("volume_shadow_official_integrity_pass", False))
+
+    if official_ok:
+        st.success(
+            "V1.3a OFFICIAL-LAYER INTEGRITY PASS: official scored values, dtypes and "
+            "row/column structure were unchanged while Contextual Volume diagnostics were built."
+        )
+    else:
+        st.error(
+            "V1.3a OFFICIAL-LAYER INTEGRITY FAIL: official scanner output changed "
+            "during shadow-volume construction. Do not use this run for acceptance."
+        )
+
+    shadow_error = scan.get("volume_shadow_error")
+    if shadow_error:
+        st.error(
+            "V1.3a shadow-volume construction failed safely. The frozen official scanner "
+            f"remains available and unchanged. Details: {shadow_error}"
+        )
+
+    if table is None or table.empty:
+        st.warning("No usable V1.3a contextual-volume diagnostics are available for this run.")
+        return
+
+    evaluated = int(summary.get("evaluated", len(table)))
+    high_conf = int(summary.get("high_confidence", 0))
+    breakout_n = int(summary.get("breakout_contexts", 0))
+    pullback_n = int(summary.get("pullback_base_contexts", 0))
+    confirming_n = int(summary.get("confirming", 0))
+    conflict_n = int(summary.get("conflict_watch", 0))
+    distribution_n = int(summary.get("distribution_watch", 0))
+    partial_n = int(summary.get("partial_excluded", 0))
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Candidates evaluated", f"{evaluated:,}")
+    m2.metric("HIGH Volume Data Confidence", f"{high_conf:,}/{evaluated:,}")
+    m3.metric("Breakout contexts", f"{breakout_n:,}")
+    m4.metric("Pullback / VCP / base", f"{pullback_n:,}")
+
+    m5, m6, m7, m8 = st.columns(4)
+    m5.metric("Volume CONFIRMING", f"{confirming_n:,}")
+    m6.metric("CONFLICT / WATCH", f"{conflict_n:,}")
+    m7.metric("Distribution watch", f"{distribution_n:,}")
+    m8.metric("Partial session excluded", f"{partial_n:,}")
+
+    not_ranked = int((table["contextual_volume_state"].astype(str) == "NOT RANKED").sum())
+    if partial_n:
+        st.caption(
+            f"{partial_n:,} candidate(s) had a same-day daily bar excluded because the "
+            "session had not reached the conservative 16:30 ET completion cutoff. "
+            "Formal volume diagnostics therefore compare full sessions with full sessions."
+        )
+    if not_ranked:
+        st.warning(
+            f"{not_ranked:,} candidate(s) are NOT RANKED for Contextual Volume because "
+            "Volume Data Confidence is LOW. No neutral/average volume conclusion is substituted."
+        )
+
+    st.caption(
+        "Frozen V1.2.3c setup/Entry logic still retains its legacy vol_ratio behavior. "
+        "V1.3a does not rewrite that official logic; this shadow section deliberately "
+        "uses completed-session evidence so any disagreement can be measured before promotion."
+    )
+
+    display_cols = [
+        "symbol",
+        "official_bucket",
+        "official_setup",
+        "official_candidate_quality",
+        "official_entry_quality",
+        "price_context",
+        "eval_session",
+        "rvol_20",
+        "vol5_vs_prior20",
+        "vol10_vs_prior20",
+        "up_down_vol_ratio_10",
+        "up_volume_share_10_pct",
+        "accumulation_days_10",
+        "distribution_days_10",
+        "volume_trend_5",
+        "volume_trend_10",
+        "contextual_volume_state",
+        "volume_data_confidence",
+        "volume_notes",
+    ]
+
+    def _display_frame(source):
+        out = source[[c for c in display_cols if c in source.columns]].copy()
+        for col in [
+            "official_candidate_quality",
+            "official_entry_quality",
+            "rvol_20",
+            "vol5_vs_prior20",
+            "vol10_vs_prior20",
+            "up_down_vol_ratio_10",
+            "up_volume_share_10_pct",
+        ]:
+            if col in out.columns:
+                out[col] = pd.to_numeric(out[col], errors="coerce").round(2)
+        return out
+
+    confirming = table[table["contextual_volume_state"].astype(str) == "CONFIRMING"].copy()
+    if not confirming.empty:
+        confirming["_q"] = pd.to_numeric(
+            confirming["official_candidate_quality"], errors="coerce"
+        )
+        confirming = confirming.sort_values("_q", ascending=False).drop(columns="_q")
+        st.markdown("**Volume-confirming setups — shadow evidence**")
+        st.dataframe(
+            _display_frame(confirming).head(40),
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.caption("No candidate currently has a CONFIRMING contextual-volume label.")
+
+    conflict = table[table["contextual_volume_state"].astype(str) == "CONFLICT / WATCH"].copy()
+    if not conflict.empty:
+        conflict["_q"] = pd.to_numeric(
+            conflict["official_candidate_quality"], errors="coerce"
+        )
+        conflict = conflict.sort_values("_q", ascending=False).drop(columns="_q")
+        st.markdown("**Volume-conflict watch — good price structure is not rescued**")
+        st.dataframe(
+            _display_frame(conflict).head(40),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with st.expander("V1.3a full contextual-volume diagnostic audit", expanded=False):
+        st.dataframe(
+            _display_frame(table),
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(
+            "RVOL uses the evaluated completed session versus the prior 20 completed "
+            "sessions. 5D and 10D participation ratios use non-overlapping prior-20 "
+            "baselines. Accumulation/distribution counts are diagnostics, not scores. "
+            "V1.3a intentionally has no 0–100 Volume Quality score yet."
+        )
+
+
 def _symbol_key(symbol):
     """Canonical comparison key for external index/ETF vs Alpaca tickers."""
     return "".join(ch for ch in str(symbol).upper().strip() if ch.isalnum())
@@ -2357,6 +2517,24 @@ if run:
     if not scored.empty:
         scored = scored.merge(universe_df, on="symbol", how="left")
 
+    # V1.3a Contextual Volume Quality — SHADOW ONLY. Keep an exact deep copy
+    # around construction so the live app can prove official scoring is unchanged.
+    # A shadow-layer defect must fail visibly without taking down the frozen scanner.
+    _scored_before_volume_shadow = scored.copy(deep=True)
+    volume_shadow_error = None
+    try:
+        volume_shadow = build_contextual_volume_quality(
+            scored,
+            bars,
+            asof_utc=datetime.now(timezone.utc),
+        )
+        volume_shadow_summary = summarize_contextual_volume_quality(volume_shadow)
+    except Exception as exc:
+        volume_shadow = pd.DataFrame()
+        volume_shadow_summary = summarize_contextual_volume_quality(volume_shadow)
+        volume_shadow_error = str(exc)
+    volume_shadow_official_integrity_pass = scored.equals(_scored_before_volume_shadow)
+
     bucket_audit = bucket_integrity(scored)
     starting_count = universe_member_count or liquidity_audit["matched_count"]
 
@@ -2384,6 +2562,10 @@ if run:
         "bars": bars,
         "cross_section": cross_section,
         "scored": scored,
+        "volume_shadow": volume_shadow,
+        "volume_shadow_summary": volume_shadow_summary,
+        "volume_shadow_official_integrity_pass": volume_shadow_official_integrity_pass,
+        "volume_shadow_error": volume_shadow_error,
         "rejected": rejected,
         "universe_name": universe_name,
         "reference_signature": reference_signature(
@@ -3197,7 +3379,7 @@ with st.expander("🔎 Scanner Audit Integrity", expanded=True):
             ]
         ].copy()
         cutoff_view = cutoff_view.rename(
-            columns={"snapshot_price": "prev_close"}
+            columns={"snapshot_price": "prev_close"},
         )
         cutoff_view["prev_close"] = cutoff_view["prev_close"].map(
             lambda x: f"${x:,.2f}"
@@ -3303,6 +3485,9 @@ st.info(
     "cross-sectional input for composite attribution; official scanner "
     "eligibility, ranking, buckets, Entry Quality and trade decisions remain frozen."
 )
+
+st.divider()
+render_contextual_volume_quality(res)
 
 # -----------------------------------------------------------------------------
 # 4) Candidate accounting and buckets
