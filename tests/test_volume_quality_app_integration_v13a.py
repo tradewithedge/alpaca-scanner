@@ -18,15 +18,22 @@ class V13aAppIntegrationTests(unittest.TestCase):
     def test_app_syntax_parses(self):
         self.assertIsInstance(self.tree, ast.Module)
 
-    def test_version_is_v13a(self):
-        self.assertIn('APP_VERSION = "V1.3a"', self.source)
+    def test_v13a_volume_layer_survives_later_app_versions(self):
+        # This is a V1.3a architecture regression test, not a permanent lock on
+        # the top-level app version. Later phases must retain the frozen 3G layer.
+        self.assertIn('st.subheader("3G) Contextual Volume Quality — Shadow Diagnostics")', self.source)
+        self.assertIn("render_contextual_volume_quality(res)", self.source)
 
     def test_volume_module_is_imported_and_hot_reloaded(self):
         self.assertIn(
             "import scanner.volume_quality as volume_quality_module",
             self.source,
         )
-        self.assertIn("    volume_quality_module,\n    regime_module,", self.source)
+        self.assertIn("    volume_quality_module,\n", self.source)
+        self.assertLess(
+            self.source.find("    volume_quality_module,\n"),
+            self.source.find("    regime_module,\n"),
+        )
 
     def test_shadow_builder_and_summary_are_bound(self):
         self.assertIn(
