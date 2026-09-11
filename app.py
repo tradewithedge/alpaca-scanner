@@ -25,6 +25,7 @@ import scanner.composite_robustness as composite_robustness_module
 import scanner.composite_architecture as composite_architecture_module
 import scanner.leadership as leadership_module
 import scanner.volume_quality as volume_quality_module
+import scanner.entry_location as entry_location_module
 import scanner.regime as regime_module
 import scanner.scoring as scoring_module
 import scanner.universe as universe_module
@@ -42,6 +43,7 @@ for _module in (
     composite_architecture_module,
     leadership_module,
     volume_quality_module,
+    entry_location_module,
     regime_module,
     scoring_module,
     universe_module,
@@ -99,6 +101,8 @@ summarize_selected_composite = composite_architecture_module.summarize_selected_
 add_leadership_features = leadership_module.add_leadership_features
 build_contextual_volume_quality = volume_quality_module.build_contextual_volume_quality
 summarize_contextual_volume_quality = volume_quality_module.summarize_contextual_volume_quality
+build_entry_location_diagnostics = entry_location_module.build_entry_location_diagnostics
+summarize_entry_location_diagnostics = entry_location_module.summarize_entry_location_diagnostics
 aggregate_regime = regime_module.aggregate_regime
 with_breadth = regime_module.with_breadth
 build_cross_section = scoring_module.build_cross_section
@@ -111,7 +115,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.3a"
+APP_VERSION = "V1.3b"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -121,13 +125,13 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • V1.2.3c frozen Candidate/Composite baseline • V1.3a Contextual Volume Diagnostics"
+    "• Trade With Edge • V1.3a Contextual Volume frozen SHADOW baseline • V1.3b Entry Location / Anti-Chase"
 )
 st.caption(
-    "Roadmap stage: V1.3a Contextual Volume Quality Engine • SHADOW ONLY • "
-    "price structure is classified before volume is interpreted • completed-session "
-    "SIP evidence only • V1.2.3c F15 (59.5% CQ + 25.5% Leadership + 15% Fundamental) "
-    "remains frozen • no change to official Candidate Quality, Entry Quality, ranking, buckets or trade decisions"
+    "Roadmap stage: V1.3b Entry Location & Anti-Chase Foundation • SHADOW ONLY • "
+    "continuous extension pressure is measured against the existing frozen hard NO CHASE ceilings "
+    "(EMA8 / EMA20 / ATR) • V1.3a remains frozen • no change to official Candidate Quality, "
+    "F15 Composite, Entry Quality, ranking, buckets, event gates or trade decisions"
 )
 
 
@@ -1450,6 +1454,198 @@ def render_contextual_volume_quality(scan):
         )
 
 
+
+def render_entry_location_diagnostics(scan):
+    """Render V1.3b continuous Entry Location / Anti-Chase diagnostics, shadow only."""
+    st.subheader("3H) Entry Location & Anti-Chase — Shadow Diagnostics")
+    st.info(
+        "V1.3b SHADOW MODE: extension is measured continuously against the EXISTING "
+        "frozen hard NO CHASE ceilings. The hard ceilings themselves are not relaxed, "
+        "and this section does NOT change official Entry Quality, Candidate Quality, "
+        "F15 Composite, ranking, buckets, event gates or trade decisions."
+    )
+
+    table = scan.get("entry_location_shadow")
+    summary = scan.get("entry_location_shadow_summary") or {}
+    official_ok = bool(scan.get("entry_location_official_integrity_pass", False))
+    parity_ok = bool(scan.get("entry_location_hard_ceiling_parity_pass", False))
+
+    if official_ok:
+        st.success(
+            "V1.3b OFFICIAL-LAYER INTEGRITY PASS: official scored values, dtypes and "
+            "row/column structure were unchanged while Entry Location diagnostics were built."
+        )
+    else:
+        st.error(
+            "V1.3b OFFICIAL-LAYER INTEGRITY FAIL: official scanner output changed during "
+            "shadow Entry Location construction. Do not use this run for acceptance."
+        )
+
+    if parity_ok:
+        st.success(
+            "V1.3b HARD NO CHASE PARITY PASS: the independent shadow recomputation agrees "
+            "with the frozen official chase gate for every rankable candidate."
+        )
+    else:
+        st.error(
+            "V1.3b HARD NO CHASE PARITY FAIL: at least one independently recomputed hard "
+            "ceiling disagrees with the frozen official chase gate. Investigate before acceptance."
+        )
+
+    shadow_error = scan.get("entry_location_shadow_error")
+    if shadow_error:
+        st.error(
+            "V1.3b Entry Location construction failed safely. The frozen official scanner "
+            f"remains available and unchanged. Details: {shadow_error}"
+        )
+
+    if table is None or table.empty:
+        st.warning("No usable V1.3b Entry Location diagnostics are available for this run.")
+        return
+
+    evaluated = int(summary.get("evaluated", len(table)))
+    ranked = int(summary.get("ranked", 0))
+    prime = int(summary.get("prime_controlled", 0))
+    acceptable = int(summary.get("acceptable", 0))
+    stretched = int(summary.get("stretched", 0))
+    very_late = int(summary.get("very_late", 0))
+    repair = int(summary.get("repair_below_ema20", 0))
+    hard = int(summary.get("hard_no_chase", 0))
+    near_ceiling = int(summary.get("near_ceiling_watch", 0))
+    late_actionable = int(summary.get("late_official_actionable", 0))
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Candidates evaluated", f"{evaluated:,}")
+    m2.metric("Rankable location data", f"{ranked:,}/{evaluated:,}")
+    m3.metric("PRIME / CONTROLLED", f"{prime:,}")
+    m4.metric("ACCEPTABLE", f"{acceptable:,}")
+
+    m5, m6, m7, m8 = st.columns(4)
+    m5.metric("STRETCHED", f"{stretched:,}")
+    m6.metric("VERY LATE / ceiling", f"{very_late:,}")
+    m7.metric("REPAIR / below EMA20", f"{repair:,}")
+    m8.metric("Hard NO CHASE", f"{hard:,}")
+
+    st.caption(
+        f"Near-ceiling watch (75%–<100% of a frozen hard ceiling): {near_ceiling:,}. "
+        f"Official ACTIONABLE/TECH ACTIONABLE names already STRETCHED or VERY LATE in shadow: "
+        f"{late_actionable:,}. These are research diagnostics only."
+    )
+    st.caption(
+        "Frozen hard NO CHASE semantics are preserved exactly: >5.0% above EMA8, "
+        ">8.0% above EMA20, or >2.0 ATR above EMA20. Exactly at a ceiling is not a "
+        "hard breach under the existing strict '>' rule, but V1.3b can label it VERY LATE."
+    )
+    st.caption(
+        "Continuous pressure = positive extension divided by its frozen hard ceiling. "
+        "The maximum of EMA8 / EMA20 / ATR pressure is shown transparently; V1.3b does "
+        "not create a production Entry Location score or change an official decision."
+    )
+
+    display_cols = [
+        "symbol",
+        "official_bucket",
+        "official_setup",
+        "official_candidate_quality",
+        "official_entry_quality",
+        "official_decision",
+        "close",
+        "ema8",
+        "ema20",
+        "ext_ema8_pct",
+        "ext_ema20_pct",
+        "ext_atr",
+        "ema8_pressure_pct",
+        "ema20_pressure_pct",
+        "atr_pressure_pct",
+        "max_chase_pressure_pct",
+        "hard_ceiling_headroom_pct",
+        "dominant_extension_axis",
+        "entry_location_state",
+        "hard_no_chase",
+        "hard_no_chase_reasons",
+        "official_hard_no_chase",
+        "hard_no_chase_parity",
+        "location_data_confidence",
+        "location_notes",
+    ]
+
+    def _display_location_frame(source):
+        out = source[[c for c in display_cols if c in source.columns]].copy()
+        for col in [
+            "official_candidate_quality",
+            "official_entry_quality",
+            "close",
+            "ema8",
+            "ema20",
+            "ext_ema8_pct",
+            "ext_ema20_pct",
+            "ext_atr",
+            "ema8_pressure_pct",
+            "ema20_pressure_pct",
+            "atr_pressure_pct",
+            "max_chase_pressure_pct",
+            "hard_ceiling_headroom_pct",
+        ]:
+            if col in out.columns:
+                out[col] = pd.to_numeric(out[col], errors="coerce").round(2)
+        return out
+
+    late_watch = table[
+        table["entry_location_state"].astype(str).isin(
+            ["STRETCHED", "VERY LATE / AT CEILING"]
+        )
+        & ~table["hard_no_chase"].fillna(False).astype(bool)
+    ].copy()
+    if not late_watch.empty:
+        late_watch["_pressure"] = pd.to_numeric(
+            late_watch["max_chase_pressure_pct"], errors="coerce"
+        )
+        late_watch = late_watch.sort_values("_pressure", ascending=False).drop(columns="_pressure")
+        st.markdown("**Late-entry watch — before the frozen binary NO CHASE gate**")
+        st.dataframe(
+            _display_location_frame(late_watch).head(40),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    hard_table = table[table["hard_no_chase"].fillna(False).astype(bool)].copy()
+    if not hard_table.empty:
+        hard_table["_pressure"] = pd.to_numeric(
+            hard_table["max_chase_pressure_pct"], errors="coerce"
+        )
+        hard_table = hard_table.sort_values("_pressure", ascending=False).drop(columns="_pressure")
+        st.markdown("**Hard NO CHASE — independently recomputed frozen ceilings**")
+        st.dataframe(
+            _display_location_frame(hard_table).head(40),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    full_export = _display_location_frame(table)
+    st.download_button(
+        "Download FULL V1.3b Entry Location diagnostic CSV",
+        data=full_export.to_csv(index=False).encode("utf-8"),
+        file_name="v13b_entry_location_full_diagnostic.csv",
+        mime="text/csv",
+        key="download_v13b_entry_location_full",
+    )
+
+    with st.expander("V1.3b full Entry Location / Anti-Chase diagnostic audit", expanded=False):
+        st.dataframe(
+            full_export,
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(
+            "Pressure bands are provisional research labels normalized to the existing frozen "
+            "hard ceilings: ≤40% PRIME/CONTROLLED, ≤65% ACCEPTABLE, ≤85% STRETCHED, "
+            ">85% VERY LATE until a hard ceiling is actually exceeded. Price below the EMA20 "
+            "repair band is classified separately so low positive-extension pressure is not "
+            "mistaken for a good entry. Threshold expectancy remains unproven."
+        )
+
+
 def _symbol_key(symbol):
     """Canonical comparison key for external index/ETF vs Alpaca tickers."""
     return "".join(ch for ch in str(symbol).upper().strip() if ch.isalnum())
@@ -2535,6 +2731,38 @@ if run:
         volume_shadow_error = str(exc)
     volume_shadow_official_integrity_pass = scored.equals(_scored_before_volume_shadow)
 
+    # V1.3b Entry Location & Anti-Chase Foundation — SHADOW ONLY. Recompute
+    # continuous extension pressure against the EXISTING frozen hard ceilings.
+    # This must remain a separate diagnostic table and must not alter official
+    # Entry Quality, the binary chase gate, buckets, ranking or trade decisions.
+    _scored_before_entry_location_shadow = scored.copy(deep=True)
+    entry_location_shadow_error = None
+    try:
+        entry_location_shadow = build_entry_location_diagnostics(
+            scored,
+            max_ext_ema8_pct=cfg.max_ext_ema8_pct,
+            max_ext_ema20_pct=cfg.max_ext_ema20_pct,
+            max_ext_atr=cfg.max_ext_atr,
+        )
+        entry_location_shadow_summary = summarize_entry_location_diagnostics(
+            entry_location_shadow
+        )
+    except Exception as exc:
+        entry_location_shadow = pd.DataFrame()
+        entry_location_shadow_summary = summarize_entry_location_diagnostics(
+            entry_location_shadow
+        )
+        entry_location_shadow_error = str(exc)
+    entry_location_official_integrity_pass = scored.equals(
+        _scored_before_entry_location_shadow
+    )
+    entry_location_hard_ceiling_parity_pass = bool(
+        entry_location_shadow_error is None
+        and entry_location_shadow is not None
+        and not entry_location_shadow.empty
+        and entry_location_shadow_summary.get("hard_ceiling_parity_mismatches", 0) == 0
+    )
+
     bucket_audit = bucket_integrity(scored)
     starting_count = universe_member_count or liquidity_audit["matched_count"]
 
@@ -2566,6 +2794,11 @@ if run:
         "volume_shadow_summary": volume_shadow_summary,
         "volume_shadow_official_integrity_pass": volume_shadow_official_integrity_pass,
         "volume_shadow_error": volume_shadow_error,
+        "entry_location_shadow": entry_location_shadow,
+        "entry_location_shadow_summary": entry_location_shadow_summary,
+        "entry_location_official_integrity_pass": entry_location_official_integrity_pass,
+        "entry_location_hard_ceiling_parity_pass": entry_location_hard_ceiling_parity_pass,
+        "entry_location_shadow_error": entry_location_shadow_error,
         "rejected": rejected,
         "universe_name": universe_name,
         "reference_signature": reference_signature(
@@ -3488,6 +3721,9 @@ st.info(
 
 st.divider()
 render_contextual_volume_quality(res)
+
+st.divider()
+render_entry_location_diagnostics(res)
 
 # -----------------------------------------------------------------------------
 # 4) Candidate accounting and buckets
