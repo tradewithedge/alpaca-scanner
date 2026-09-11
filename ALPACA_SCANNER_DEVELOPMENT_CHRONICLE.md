@@ -1,15 +1,15 @@
 # ALPACA Scanner - Development Chronicle & Architecture Record
 
-**Revision:** Rev.2  
-**Prepared:** 7 September 2026  
-**Current accepted implementation baseline:** V1.2.3c - Composite Architecture Selection & Explainable Guardrail Layer  
-**V1.2.3c status:** **ACCEPTED / FROZEN**  
-**Current development checkpoint:** V1.3a - Contextual Volume Quality Engine  
-**Current development status:** OPEN / DESIGN - no V1.3 code authorized before reconciliation and freeze documentation
+**Revision:** Rev.3  
+**Prepared:** 11 September 2026  
+**Current accepted implementation checkpoint:** V1.3a - Contextual Volume Quality Diagnostics  
+**V1.3a status:** **ACCEPTED / FROZEN (SHADOW)**  
+**Official decision-layer authority:** unchanged by V1.3a  
+**Next development checkpoint:** V1.3b - Entry Location & Anti-Chase Foundation
 
 > This is the authoritative living engineering-history record for the ALPACA Scanner. It preserves problems encountered, evidence observed, architecture selected, alternatives rejected, validation performed, frozen principles, open risks and the next permitted development move.
 
-> **Rev.2 consolidation note:** this revision intentionally consolidates repetitive wording from Rev.1 while preserving the verified development lineage, key defects, architecture decisions and acceptance evidence. The previous detailed Rev.1 remains permanently recoverable in Git commit history; this consolidation must not be interpreted as erasing a prior frozen decision.
+> **Rev.3 note:** this revision freezes V1.3a after machine-readable cross-universe validation, records the completed-session/partial-session volume finding, adopts a machine-readable Validation Evidence Standard, reconciles the research-register IDs, and clarifies V1.7 as **Expectancy Validation / Backtest / Forward-Test Lab**. Earlier frozen decisions remain preserved in Git history and are not silently rewritten.
 
 ---
 
@@ -31,11 +31,13 @@ This chronicle answers, for every meaningful phase:
 
 ### 0.2 Evidence hierarchy
 
-1. Development decisions and acceptance outcomes.
-2. Retained source artifacts, tests and roadmap/ADR files.
-3. Live Streamlit validation evidence, including screenshots.
-4. Calibration datasets/results.
+1. Development decisions, acceptance outcomes and frozen architecture records.
+2. Retained source artifacts, automated tests, Roadmap and ADR files.
+3. **Full machine-readable live/calibration evidence with programmatic reconciliation.**
+4. Live Streamlit screenshots for deployment/settings/UI proof.
 5. Current implementation behavior verified from code.
+
+Screenshots remain useful acceptance evidence for UI/deployment state, but screenshots alone do not freeze a quantitative engine when full-population machine-readable evidence is available.
 
 Historical uncertainty must be marked, not repaired with invented detail.
 
@@ -54,7 +56,25 @@ Historical uncertainty must be marked, not repaired with invented detail.
 
 No major stage is fully frozen until behavior passes acceptance, this chronicle is updated, relevant ADRs are updated, known limitations are documented and frozen-principle impact is stated.
 
-No new major phase opens until the **Roadmap Reconciliation Gate** is completed across Roadmap, Chronicle, ADRs, outstanding research, live-test/case-study lessons and frozen dependencies. Every unresolved item must be ASSIGNED, DEFERRED or REJECTED.
+No new major phase opens until the **Roadmap Reconciliation Gate** is completed across Roadmap, Chronicle, ADRs, outstanding research, live-test/case-study lessons and frozen dependencies. Every unresolved item must be ASSIGNED, DEFERRED, REJECTED or explicitly RESOLVED/FROZEN.
+
+### 0.5 Validation Evidence Standard
+
+For quantitative acceptance, full machine-readable evidence is required whenever the system can produce it.
+
+Programmatic checks should include as applicable:
+
+- full-population row reconciliation;
+- unique symbols / duplicates;
+- missingness;
+- frozen-layer equality;
+- bucket/state reconciliation;
+- confidence/data-quality coverage;
+- session/timestamp alignment;
+- cross-universe behavior;
+- threshold/outlier/borderline cases.
+
+A dashboard table may be capped for readability, but a capped display/export is not proof of a complete population. Use a full underlying export or full audit table.
 
 ---
 
@@ -70,9 +90,10 @@ The architecture deliberately separates:
 - **Leadership:** relative-strength persistence and market-stress resilience;
 - **Fundamental Quality (FQ):** reported business-performance quality from SEC CompanyFacts;
 - **Composite Quality:** higher-level combined candidate assessment;
-- **Entry Quality:** separate timing/actionability truth.
+- **Entry Quality:** separate timing/actionability truth;
+- **Contextual Volume Quality:** setup-dependent participation evidence near Setup/Entry, not a replacement for the layers above.
 
-The V1.2 Candidate Quality program is now architecture-complete through **V1.2.3c**, which froze F15 as the accepted Composite architecture while leaving it shadow-only. The next program is V1.3 Entry Quality, beginning with the previously outstanding **Contextual Volume Quality Engine**.
+The V1.2 Candidate Quality program is architecture-complete through **V1.2.3c**. V1.3a is now accepted/frozen as a **SHADOW contextual-volume diagnostic architecture**. The next permitted development move is **V1.3b - Entry Location & Anti-Chase Foundation**.
 
 ---
 
@@ -88,8 +109,11 @@ The V1.2 Candidate Quality program is now architecture-complete through **V1.2.3
 | COMP-01 | Composite is a higher-level assessment, not a replacement for its inputs |
 | ENTRY-01 | Entry Quality remains separate from candidate desirability |
 | VOL-01 | Liquidity Quality and Contextual Volume Quality are different domains |
+| VOL-02 | Volume meaning is setup-dependent; breakout expansion and pullback/VCP contraction are not interchangeable |
 | DATA-01 | Invalid/incomplete/ambiguous data cannot create false precision |
+| DATA-02 | Session completeness must be explicit when comparing volume against full-session baselines |
 | CAL-01 | Production weight/gate changes require evidence |
+| VAL-01 | Quantitative acceptance requires machine-readable full-population evidence when available |
 | FREEZE-01 | Frozen behavior is not modified in place |
 | ACT-01 | NO TRADE remains a valid outcome |
 
@@ -119,7 +143,7 @@ Established consolidated SIP discipline for previous-day liquidity and historica
 
 **Status:** Complete / Frozen
 
-Added scanner-funnel accounting and bucket reconciliation so every persistent-quality candidate must be accounted for in exactly one decision bucket. This became a core acceptance invariant used again in V1.2.3c.
+Added scanner-funnel accounting and bucket reconciliation so every persistent-quality candidate must be accounted for in exactly one decision bucket. This became a core acceptance invariant used again in later phases.
 
 ## 3.5 V1.2.1 - Relative Leadership & Market-Stress Resilience
 
@@ -302,11 +326,11 @@ Both universes passed the live integrity and official-decision-path invariants. 
 
 # 4. Process Gap Review - Contextual Volume Quality Omission
 
-## 4.1 What happened
+## 4.1 Symptom
 
 Contextual Volume Quality had been retained as an outstanding research item, but it was not promoted into the formal GitHub roadmap as a named stage. After V1.2.3c acceptance, development followed the formal roadmap mechanically and decomposed V1.3 around entry location/trigger/R:R without first reconciling unresolved research items.
 
-The current code already contains rudimentary volume logic, which made the omission easier to miss: breakout confirmation uses relative-volume expansion and pullback/VCP logic gives a small benefit for contraction. That is not equivalent to a complete Contextual Volume Quality engine.
+The existing code already contained rudimentary volume logic, which made the omission easier to miss: breakout confirmation used relative-volume expansion and pullback/VCP logic gave a small benefit for contraction. That was not equivalent to a complete Contextual Volume Quality engine.
 
 ## 4.2 Root cause
 
@@ -317,31 +341,45 @@ Two planning layers were not formally reconciled:
 
 An item could therefore remain known but unmapped.
 
-## 4.3 Control introduced
+## 4.3 Corrective action
 
-A mandatory **Roadmap Reconciliation Gate** now precedes every new major phase. Roadmap, Chronicle, ADRs, outstanding research, case-study/live-test lessons and frozen dependencies must be reconciled. Every open item must be ASSIGNED, DEFERRED or REJECTED.
+A mandatory **Roadmap Reconciliation Gate** now precedes every new major phase. Roadmap, Chronicle, ADRs, outstanding research, case-study/live-test lessons and frozen dependencies must be reconciled.
 
-## 4.4 Architecture correction
+## 4.4 Prevention rule
 
-V1.3 is now decomposed as:
+Every open item must be ASSIGNED, DEFERRED, REJECTED or RESOLVED/FROZEN. No unresolved design dependency may remain only in conversational memory.
 
-1. **V1.3a - Contextual Volume Quality Engine**;
+## 4.5 Architecture correction
+
+V1.3 is decomposed as:
+
+1. V1.3a - Contextual Volume Quality Diagnostics;
 2. V1.3b - Entry Location & Anti-Chase;
 3. V1.3c - Trigger & Entry-Zone;
 4. V1.3d - Risk/Reward & Stop-Distance Gate;
 5. V1.3e - READY / WATCH / WAIT / NO CHASE decisions;
 6. V1.3f - Shadow Execution-Capture Logging / staged-execution preparation.
 
-This correction is made **before any V1.3 code patch**, so no frozen layer needs repair.
-
 ---
 
-# 5. V1.3a - Contextual Volume Quality Engine
+# 5. V1.3a - Contextual Volume Quality Diagnostics
 
-**Status:** OPEN / DESIGN  
-**Initial mode:** SHADOW ONLY
+**Status:** **ACCEPTED / FROZEN (SHADOW) - 11 Sep 2026**  
+**ADR:** `docs/architecture/ADR-002-contextual-volume-quality-v13a.md`
 
-## 5.1 Architectural boundary
+## 5.1 Objective
+
+Create a setup-aware volume evidence layer that distinguishes:
+
+- breakout participation/expansion;
+- pullback/VCP/tight-base contraction;
+- accumulation versus distribution;
+- constructive versus conflicting price-volume behavior;
+- trustworthy versus insufficient volume data.
+
+The first accepted architecture remains **SHADOW ONLY**.
+
+## 5.2 Architectural boundary
 
 > **Liquidity Quality != Contextual Volume Quality.**
 
@@ -349,57 +387,188 @@ Liquidity answers whether a security is tradeable efficiently. Contextual Volume
 
 Volume Quality belongs downstream near Setup/Entry, not inside F15 Composite.
 
-## 5.2 Why the current volume logic is insufficient
+## 5.3 Implemented architecture
 
-Existing scoring uses limited volume conditions such as breakout relative-volume confirmation and low/contraction volume for pullback/VCP. It does not yet evaluate:
+The accepted V1.3a layer:
 
-- volume trend across multiple sessions;
-- setup-specific dry-up versus expansion;
-- up-day/down-day participation asymmetry;
-- abnormal distribution;
-- price-volume disagreement;
-- volume behavior during recent stress;
-- explicit Volume Data Confidence.
+- classifies price context before interpreting new volume diagnostics;
+- uses completed consolidated SIP daily sessions;
+- excludes the same-day daily bar before **16:30 ET**;
+- uses explicit HIGH / MEDIUM / LOW Volume Data Confidence;
+- makes LOW confidence **NOT RANKED**, not neutral;
+- calculates completed-session RVOL versus the prior 20 sessions;
+- calculates non-overlapping 5D and 10D volume trends;
+- calculates 10D up/down-volume ratio and up-volume share;
+- counts accumulation and distribution sessions;
+- interprets breakout expansion differently from pullback/VCP contraction;
+- prevents favorable volume from rescuing broken price structure;
+- returns a separate shadow table;
+- does not write new volume features back into the official scored frame;
+- does not create a 0-100 Volume Quality score.
 
-## 5.3 Candidate research features
+## 5.4 Offline implementation validation
 
-Before weights are selected, V1.3a should expose/validate:
+- `py_compile`: PASS.
+- Dedicated V1.3a unit/integration suite: **22/22 PASS**.
+- Tests covered completed-session handling, immutability, prior-20 RVOL baseline, setup-specific interpretation, LOW-confidence behavior, distribution accounting, app integration and no-merge/official-layer isolation.
+- The isolated packaging environment did **not** run the entire pre-existing repository regression suite; this is stated explicitly rather than implied.
 
-- current RVOL versus 20D baseline;
-- 5D/10D volume trend/dry-up;
-- breakout participation quality;
-- pullback volume contraction quality;
-- VCP/tightening contraction quality;
-- up-volume vs down-volume behavior;
-- abnormal distribution/heavy selling count;
-- price-volume confirmation/divergence;
-- volume behavior during pullback/stress windows;
-- consolidated-SIP Volume Data Confidence / coverage.
+## 5.5 S&P 500 live validation
 
-The first patch should emphasize feature integrity and explainability, not force a final score formula prematurely.
+**Controls:** S&P 500 / STRICT / min $5 / prev-day $vol $20M / max deep scan 2000 / strict event gate ON.
+
+Full Swing Candidates and full Contextual Volume Diagnostic CSVs were reconciled programmatically:
+
+- **127 official candidates / 127 contextual rows**;
+- **127 unique symbols**, duplicates **0**;
+- population match **127/127**;
+- official bucket mismatches **0**;
+- official setup mismatches **0**;
+- Candidate Quality mismatches **0**;
+- Entry Quality mismatches **0**;
+- Volume Data Confidence **127/127 HIGH**;
+- evaluation session **2026-09-04** for all rows;
+- state reconciliation: **41 CONFIRMING + 38 MIXED + 34 DIAGNOSTIC ONLY + 14 CONFLICT/WATCH = 127**;
+- context reconciliation: **83 EMA20 PULLBACK + 35 NO CLEAN SETUP + 4 BREAKOUT + 4 MA20 REPAIR + 1 TIGHT BASE = 127**.
+
+The sample demonstrated that the new layer is contextual rather than a simple high-volume reward. Pullback names could confirm through contraction, while breakouts demanded participation. Borderline cases were retained for later outcome calibration rather than used to loosen rules.
+
+## 5.6 Russell 2000 live validation
+
+The final controlled Russell run was taken before U.S. pre-market so both legacy and V1.3a volume metrics referenced the same completed session.
+
+Full machine-readable reconciliation:
+
+- **85 official candidates / 85 contextual rows**;
+- **85 unique symbols**, duplicates **0**;
+- population match **85/85**;
+- official bucket mismatches **0**;
+- official setup mismatches **0**;
+- Candidate Quality mismatches **0**;
+- Entry Quality mismatches **0**;
+- Volume Data Confidence **85/85 HIGH**;
+- evaluation session **2026-09-10** for all rows;
+- state reconciliation: **24 CONFIRMING + 11 MIXED + 13 CONFLICT/WATCH + 37 DIAGNOSTIC ONLY = 85**;
+- context reconciliation: **39 EMA20 PULLBACK + 24 NO CLEAN SETUP + 12 MA20 REPAIR + 5 BREAKOUT + 3 BROKEN/BELOW MA50 + 2 VCP/TIGHTENING = 85**.
+
+## 5.7 Session-comparability finding
+
+### Symptom
+
+During an intraday Russell run, frozen official `vol_ratio` and V1.3a `rvol_20` differed dramatically for some stocks. The discrepancy could have been misread as a formula defect.
+
+### Root cause
+
+The two metrics were sometimes observing different session completeness:
+
+- frozen `vol_ratio` uses the latest available daily-bar volume divided by the prior-20-session average;
+- V1.3a deliberately excludes the same-day daily bar before 16:30 ET and evaluates the latest completed session.
+
+Comparing partial-day volume with a completed-session baseline is not like-for-like.
+
+### Corrective action / evidence
+
+Three live timing samples were compared:
+
+| Timing condition | Pearson correlation | Evidence |
+|---|---:|---|
+| Regular session / partial bar present | ~0.043 | severe session mismatch |
+| Pre-market/session-mismatch sample | ~0.580 | partial alignment |
+| **Controlled same-completed-session sample** | **0.999966** | metrics effectively reconcile |
+
+For the controlled 85-stock run:
+
+- Spearman: **0.999790**;
+- mean official `vol_ratio`: **0.98847x**;
+- mean V1.3a `rvol_20`: **0.98859x**;
+- **85/85 matched at two-decimal precision**.
+
+### Prevention rule
+
+Session completeness must be explicit in all future volume validation. A future intraday participation metric must compare current time-of-day volume against historical time-of-day volume or another like-for-like pace baseline. V1.3a does **not** silently rewrite the frozen legacy metric.
+
+## 5.8 Acceptance decision
+
+V1.3a is **ACCEPTED / FROZEN as a SHADOW diagnostic architecture**.
+
+Accepted:
+
+- completed-session discipline;
+- Volume Data Confidence;
+- price-context-first design;
+- contextual expansion versus contraction;
+- accumulation/distribution diagnostics;
+- separate shadow-table architecture;
+- cross-universe official-layer isolation;
+- fail-visible behavior.
+
+Not authorized:
+
+- 0-100 Volume Quality score;
+- Candidate Quality/F15 weighting;
+- official Entry Quality modification;
+- production trade gate;
+- threshold optimization based on limited live samples.
+
+Trading expectancy remains unproven and belongs to V1.7.
 
 ---
 
-# 6. Outstanding Research / Dependency Register
+# 6. Process Gap Review - Quantitative Validation Evidence
+
+## 6.1 Symptom
+
+Earlier live validation relied too heavily on screenshots, including wide diagnostic tables. Screenshots were useful for deployment proof but inefficient and insufficient for full row-level reconciliation.
+
+A concrete example occurred when the dashboard headline showed **41 CONFIRMING** while the displayed/exported confirming table contained **40 rows** because the UI intentionally used a display cap. The full diagnostic audit correctly contained all 41.
+
+## 6.2 Root cause
+
+Two evidence purposes were conflated:
+
+1. **UI/deployment acceptance**;
+2. **quantitative engine acceptance**.
+
+A screenshot can prove that a section rendered and a headline count appeared, but it cannot efficiently prove full-population equality, hidden columns, duplicates, nulls, threshold behavior or exact numeric reconciliation.
+
+## 6.3 Corrective action
+
+The project adopts the **Validation Evidence Standard**:
+
+- screenshots: version/settings/banner/headline/UI proof;
+- full CSV/machine-readable data: quantitative analysis and freeze evidence;
+- programmatic reconciliation: row counts, population identity, frozen-layer equality, duplicates, nulls, states, confidence and session alignment.
+
+## 6.4 Prevention rule
+
+A quantitative engine cannot be frozen from screenshots alone when complete machine-readable evidence is available. Display caps must never be mistaken for population caps.
+
+---
+
+# 7. Outstanding Research / Dependency Register
+
+The register is now reconciled to one canonical ID set shared with `ROADMAP.md`.
 
 | ID | Item | Disposition | Destination | Rule |
 |---|---|---|---|---|
-| R-001 | Contextual Volume Quality | ASSIGNED | **V1.3a** | First V1.3 work item |
+| R-001 | Contextual Volume Quality diagnostics architecture | **RESOLVED / FROZEN SHADOW** | **V1.3a** | Architecture accepted; outcome calibration remains V1.7 work |
 | R-002 | Candidate-vs-Entry feature separation | ASSIGNED | V1.3b-V1.3e | Preserve separate truth layers |
 | R-003 | Continuous EMA8/EMA20 extension/location quality | ASSIGNED | V1.3b | Hard NO CHASE remains a ceiling |
 | R-004 | Trigger and entry-zone architecture | ASSIGNED | V1.3c | Do not assume current close is the planned entry |
 | R-005 | Stop-distance / prospective R:R | ASSIGNED | V1.3d | Evaluate edge before actionability |
-| R-006 | READY/WATCH/WAIT/NO CHASE mapping | ASSIGNED | V1.3e | Decision-first output |
-| R-007 | ACTIONABLE-A/B/C staged execution | DEFERRED/PREP | V1.3f -> V1.6/V1.8 | Fixed total portfolio risk |
-| R-008 | Signal Capture Rate / Missed Opportunity R | ASSIGNED | V1.3f -> V1.7 | Start logging before formal lab |
-| R-009 | Earnings/event reliability | ASSIGNED | V1.5 | UNKNOWN must not equal safe |
-| R-010 | F15 production ranking influence | DEFERRED | V1.7+ | Requires outcome evidence |
-| R-011 | Stress-window sensitivity 6/10/12 sessions | DEFERRED | V1.7 | Validation research, not immediate redesign |
-| R-012 | Volume-data confidence | ASSIGNED | V1.3a | Consolidated SIP, completed sessions, fail-visible |
+| R-006 | ACTIONABLE-A/B/C staged execution | DEFERRED / PREP | V1.3f -> V1.6/V1.8 | Fixed total portfolio risk |
+| R-007 | Signal Capture Rate / Missed Opportunity R | ASSIGNED | V1.3f -> V1.7 | Start prospective logging; diagnostics underneath expectancy |
+| R-008 | Earnings/event reliability | ASSIGNED | V1.5 | UNKNOWN must not equal safe |
+| R-009 | F15 production ranking influence | DEFERRED | V1.7+ | Requires outcome evidence |
+| R-010 | Stress-window sensitivity 6/10/12 sessions | DEFERRED | V1.7 | Validation research, not immediate redesign |
+| R-011 | Volume-data confidence / completed-session reliability | **RESOLVED / FROZEN** | V1.3a | Completed SIP + fail-visible confidence accepted |
+| R-012 | Relative-strength level/direction/resilience | RESOLVED / VALIDATE LATER | V1.2.1 + V1.7 | Architecture frozen; outcome validation later |
+| **R-013** | **Trading expectancy / edge validation** | **ASSIGNED** | **V1.7** | **Central KPI using Backtest + Forward-Test evidence** |
+| R-014 | READY / WATCH / WAIT / NO CHASE mapping | ASSIGNED | V1.3e | Decision-first output |
 
 ---
 
-# 7. CF Case Study #001 - Execution Architecture Lesson
+# 8. CF Case Study #001 - Execution Architecture Lesson
 
 CF was found early, passed ACTIONABLE and the key resistance/trigger area around $133 was identified, but execution capture failed. The lesson is not to loosen standards. It is to convert hindsight regret into execution architecture:
 
@@ -411,27 +580,101 @@ Retained roadmap dependencies:
 - pre-planned conditional breakout execution;
 - maximum chase/fill limits;
 - fixed total portfolio risk;
-- Forward Test Lab separation of Signal Quality from Execution Capture;
-- Signal Capture Rate and Missed Opportunity R.
+- separation of Signal Quality from Execution Capture;
+- Signal Capture Rate and Missed Opportunity R;
+- formal expectancy validation.
 
-These are staged into V1.3f/V1.6/V1.7/V1.8 rather than being forced into V1.3a.
+**Prove Edge** is now explicitly defined as outcome validation using **Backtest + Forward-Test expectancy evidence**. Signal Capture Rate and Missed Opportunity R explain execution capture; they do not replace expectancy.
 
----
-
-# 8. Known Limitations & Open Risks
-
-1. F15 architecture mechanics are accepted, but no forward expectancy is proven.
-2. F15 remains shadow-only; production ranking authority is deferred.
-3. Fundamental concept coverage can still require sector/domain-specific work.
-4. Event-date reliability remains immature and belongs to V1.5.
-5. Entry Quality remains coarse relative to the planned V1.3 architecture.
-6. Contextual Volume Quality is not yet a formal engine; current volume use is rudimentary.
-7. Paper execution and trade journaling are not yet established.
-8. Future recalibration of frozen layers requires explicit new evidence/versioning.
+These dependencies remain staged into V1.3f/V1.6/V1.7/V1.8 rather than being forced into V1.3b.
 
 ---
 
-# 9. Version Ledger
+# 9. Planned V1.7 - Expectancy Validation / Backtest / Forward-Test Lab
+
+## 9.1 Governing question
+
+> **Does the system produce positive, repeatable trading expectancy after realistic execution friction and missed opportunities?**
+
+Backtesting remains explicit and mandatory. Forward testing does not replace it.
+
+Basic R-multiple reference:
+
+`Expectancy = Win Rate x Average Win (R) - Loss Rate x Average Loss (R)`
+
+## 9.2 Expectancy hierarchy
+
+| Layer | Purpose |
+|---|---|
+| Signal Expectancy | Was the scanner signal itself positive-expectancy under the predefined plan? |
+| Entry / Trigger Expectancy | Did the entry architecture improve or damage the underlying signal? |
+| Captured Expectancy | How much available signal expectancy was captured? |
+| Realized Expectancy | What R was realized after actual fills/stops/partials/slippage? |
+| Missed Expectancy | How much identified positive opportunity was not captured? |
+| Net Expectancy | What remains after realistic costs/friction? |
+
+A high Signal Capture Rate of a negative-expectancy strategy is failure. Positive Signal Expectancy with weak capture points to execution leakage.
+
+## 9.3 Backtest role
+
+Backtesting should provide historical breadth and regime coverage while controlling for:
+
+- look-ahead leakage;
+- timestamp-correct feature availability;
+- unrealistic fill assumptions;
+- slippage/transaction costs;
+- in-sample overfitting;
+- no-fill/gap-through/invalidation cases;
+- regime/setup/universe concentration.
+
+Use out-of-sample / walk-forward evidence and robustness/sensitivity analysis.
+
+## 9.4 Forward-test role
+
+V1.3f begins prospective logging before V1.7. Preserve at minimum:
+
+- signal timestamp;
+- setup/context;
+- Candidate Quality;
+- relevant Leadership/Fundamental/Composite states;
+- Entry Quality;
+- Contextual Volume state;
+- planned entry/zone/trigger;
+- stop and targets;
+- event/regime state;
+- trigger time;
+- fill/no-fill;
+- slippage;
+- invalidated-before-entry;
+- MAE/MFE;
+- exit path;
+- realized R;
+- Missed Opportunity R.
+
+## 9.5 Acceptance discipline
+
+A positive point estimate alone is insufficient. Evaluate sample size, dispersion, confidence intervals/bootstrap ranges where practical, drawdown, stability across time/universes/regimes/setups and sensitivity to realistic execution assumptions.
+
+Conditional expectancy should be evaluated by relevant system state to discover **where edge actually exists**.
+
+---
+
+# 10. Known Limitations & Open Risks
+
+1. F15 architecture mechanics are accepted, but production ranking authority remains shadow-only pending outcome evidence.
+2. V1.3a contextual-volume architecture is accepted, but its thresholds are not proven to improve trading expectancy.
+3. V1.3a has no authorized 0-100 score and no production Entry/Candidate weighting.
+4. The frozen legacy `vol_ratio` can represent a partial latest daily bar intraday; V1.3a deliberately avoids that comparison. A future intraday volume-pace metric requires like-for-like time-of-day evidence.
+5. Fundamental concept coverage can still require sector/domain-specific work.
+6. Event-date reliability remains immature and belongs to V1.5.
+7. Entry Quality remains coarse relative to the planned V1.3b-V1.3e architecture.
+8. Paper execution and trade journaling are not yet established.
+9. Formal Backtest / Forward-Test trading expectancy is not yet proven.
+10. Future recalibration of frozen layers requires explicit new evidence/versioning.
+
+---
+
+# 11. Version Ledger
 
 | Version | Theme | Status |
 |---|---|---|
@@ -454,11 +697,12 @@ These are staged into V1.3f/V1.6/V1.7/V1.8 rather than being forced into V1.3a.
 | V1.2.3b1 | Full precision | Frozen |
 | V1.2.3b2 | Pre-revenue integrity | Frozen |
 | **V1.2.3c** | **F15 architecture / explainable impact** | **ACCEPTED / FROZEN** |
-| **V1.3a** | **Contextual Volume Quality** | **OPEN / DESIGN** |
+| **V1.3a** | **Contextual Volume Quality Diagnostics** | **ACCEPTED / FROZEN (SHADOW)** |
+| **V1.3b** | **Entry Location & Anti-Chase Foundation** | **NEXT / DESIGN** |
 
 ---
 
-# 10. Documentation Standard for Future Phases
+# 12. Documentation Standard for Future Phases
 
 Every future major phase record must include:
 
@@ -474,10 +718,15 @@ Every future major phase record must include:
 10. files/modules affected;
 11. what did not change;
 12. validation performed;
-13. acceptance criteria;
-14. acceptance result;
-15. known limitations;
-16. decision confidence;
-17. frozen-principle impact;
-18. future dependency;
-19. Roadmap Reconciliation disposition for outstanding research/case-study items.
+13. machine-readable evidence/reconciliation where quantitative claims are made;
+14. acceptance criteria;
+15. acceptance result;
+16. known limitations;
+17. decision confidence;
+18. frozen-principle impact;
+19. future dependency;
+20. Roadmap Reconciliation disposition for outstanding research/case-study items.
+
+For defects/process gaps, use:
+
+**symptom -> root cause -> corrective action -> prevention rule**.
