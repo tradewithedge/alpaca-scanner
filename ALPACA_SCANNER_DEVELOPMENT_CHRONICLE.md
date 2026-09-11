@@ -1,15 +1,15 @@
 # ALPACA Scanner - Development Chronicle & Architecture Record
 
-**Revision:** Rev.3  
+**Revision:** Rev.4  
 **Prepared:** 11 September 2026  
-**Current accepted implementation checkpoint:** V1.3a - Contextual Volume Quality Diagnostics  
-**V1.3a status:** **ACCEPTED / FROZEN (SHADOW)**  
-**Official decision-layer authority:** unchanged by V1.3a  
-**Next development checkpoint:** V1.3b - Entry Location & Anti-Chase Foundation
+**Current accepted implementation checkpoint:** V1.3b - Entry Location & Anti-Chase Foundation  
+**V1.3b status:** **ACCEPTED / FROZEN (SHADOW)**  
+**Official decision-layer authority:** unchanged by V1.3b  
+**Next development checkpoint:** V1.3c - Trigger & Entry-Zone Architecture
 
 > This is the authoritative living engineering-history record for the ALPACA Scanner. It preserves problems encountered, evidence observed, architecture selected, alternatives rejected, validation performed, frozen principles, open risks and the next permitted development move.
 
-> **Rev.3 note:** this revision freezes V1.3a after machine-readable cross-universe validation, records the completed-session/partial-session volume finding, adopts a machine-readable Validation Evidence Standard, reconciles the research-register IDs, and clarifies V1.7 as **Expectancy Validation / Backtest / Forward-Test Lab**. Earlier frozen decisions remain preserved in Git history and are not silently rewritten.
+> **Rev.4 note:** this revision freezes V1.3b after machine-readable S&P 500 and Russell 2000 validation, records continuous entry-location pressure/headroom as a shadow architecture, preserves the existing hard NO CHASE ceilings unchanged, and formally opens V1.3c. Rev.3's V1.3a freeze, Validation Evidence Standard and V1.7 Expectancy / Backtest / Forward-Test clarification remain in force.
 
 ---
 
@@ -91,9 +91,10 @@ The architecture deliberately separates:
 - **Fundamental Quality (FQ):** reported business-performance quality from SEC CompanyFacts;
 - **Composite Quality:** higher-level combined candidate assessment;
 - **Entry Quality:** separate timing/actionability truth;
-- **Contextual Volume Quality:** setup-dependent participation evidence near Setup/Entry, not a replacement for the layers above.
+- **Contextual Volume Quality:** setup-dependent participation evidence near Setup/Entry;
+- **Entry Location:** continuous extension/headroom evidence near the frozen anti-chase boundary.
 
-The V1.2 Candidate Quality program is architecture-complete through **V1.2.3c**. V1.3a is now accepted/frozen as a **SHADOW contextual-volume diagnostic architecture**. The next permitted development move is **V1.3b - Entry Location & Anti-Chase Foundation**.
+The V1.2 Candidate Quality program is architecture-complete through **V1.2.3c**. V1.3a is frozen as a **SHADOW contextual-volume diagnostic architecture**. V1.3b is now frozen as a **SHADOW entry-location / anti-chase architecture**. The next permitted development move is **V1.3c - Trigger & Entry-Zone Architecture**.
 
 ---
 
@@ -108,6 +109,9 @@ The V1.2 Candidate Quality program is architecture-complete through **V1.2.3c**.
 | FQ-02 | REVIEW/FAIL/unavailable fundamentals are never neutrally imputed |
 | COMP-01 | Composite is a higher-level assessment, not a replacement for its inputs |
 | ENTRY-01 | Entry Quality remains separate from candidate desirability |
+| ENTRY-02 | A strong stock or high Entry Quality score cannot override a frozen hard NO CHASE breach |
+| LOC-01 | Hard anti-chase ceilings are ceilings, not targets; sub-ceiling deterioration can be measured continuously without relaxing the ceiling |
+| LOC-02 | Entry Location diagnostics remain separate from official Entry Quality until explicitly promoted by later evidence |
 | VOL-01 | Liquidity Quality and Contextual Volume Quality are different domains |
 | VOL-02 | Volume meaning is setup-dependent; breakout expansion and pullback/VCP contraction are not interchangeable |
 | DATA-01 | Invalid/incomplete/ambiguous data cannot create false precision |
@@ -275,52 +279,13 @@ Freeze the reference Composite architecture as:
 
 > **F15 = 59.5% Candidate Quality + 25.5% Leadership + 15% Fundamental Quality**
 
-F20 remains a shadow sensitivity benchmark. No hard Fundamental-impact cap is applied. Instead expose:
+F20 remains a shadow sensitivity benchmark. No hard Fundamental-impact cap is applied. REVIEW/FAIL/unavailable FQ remains unscored/unranked. F15 remains shadow-only and does not gain production ordering authority through this freeze.
 
-- NORMAL: `|impact| < 4 pts`;
-- MATERIAL: `4-6 pts`;
-- HIGH IMPACT: `>6 pts`.
+### Validation summary
 
-REVIEW/FAIL/unavailable FQ remains unscored/unranked. F15 remains shadow-only and does not gain production ordering authority through this freeze.
+Offline regression: **22/22 PASS** across retained V1.2.3b1, V1.2.3b2 and V1.2.3c tests.
 
-### Offline regression
-
-- V1.2.3b1 precision tests: 10/10 PASS;
-- V1.2.3b2 domain tests: 5/5 PASS;
-- V1.2.3c architecture tests: 7/7 PASS;
-- combined: **22/22 PASS**.
-
-### Final live acceptance - S&P 500
-
-**Controls:** S&P 500 / STRICT / min $5 / prev-day $vol $20M / max deep scan 2000 / strict event gate ON / Fundamental sample 50.
-
-**Scanner/audit:** 503 universe members; 495 matched; 495 completed SIP bars; 495 deep-scanned; 127 persistent-quality; **127/127 bucket reconciliation PASS**; usable SIP **100%**; missing SIP bars **0**.
-
-**Fundamental batch:** 50 requested; CompanyFacts 50 PASS; Integrity **47 PASS / 3 REVIEW / 0 FAIL**; usable coverage **94.0%**; median FQ **60.8/100**.
-
-**3E precision:** **FULL-PRECISION INTEGRITY PASS**; rankable 47/50; stable Top-10 F10-F30 9/10; stable center Top-10 F15/F20/F25 10/10; median rank range 4.0; high-sensitivity names 20; F20 +/-6 triggers 19.
-
-**3F selected architecture:** **V1.2.3c INTEGRITY PASS**; F15 rankable 47/50; formula 59.5/25.5/15; F15<->F20 Top-10 10/10; Spearman **0.984**; 27 NORMAL / 10 MATERIAL / 10 HIGH IMPACT; median |F15 F impact| **3.76 pts**; hard score cap **NONE**.
-
-**Official buckets:** 0 ACTIONABLE NOW + 57 TECH+EVENT CHECK + 42 A-QUALITY-WAIT + 2 WAIT/ENTRY NOT READY + 22 DEVELOPING + 4 AVOID/BROKEN = **127/127**.
-
-### Final live acceptance - Russell 2000 (IWM proxy)
-
-**Controls:** Russell 2000 proxy / STRICT / min $5 / prev-day $vol $20M / max deep scan 2000 / strict event gate ON / Fundamental sample 50.
-
-**Scanner/audit:** 1,954 proxy-universe members; 1,945 matched; 602 deep-scanned; 74 persistent-quality; **74/74 bucket reconciliation PASS**; usable SIP **100%**; missing SIP bars **0**; unmatched symbols disclosed explicitly.
-
-**Fundamental batch:** 50 requested; CompanyFacts 50 PASS; Integrity **47 PASS / 3 REVIEW / 0 FAIL**; usable coverage **94.0%**; median FQ **59.9/100**.
-
-**3E precision:** **FULL-PRECISION INTEGRITY PASS**; rankable 47/50; stable Top-10 F10-F30 7/10; stable center Top-10 F15/F20/F25 8/10; median rank range 5.0; high-sensitivity names 25; F20 +/-6 triggers 21.
-
-**3F selected architecture:** **V1.2.3c INTEGRITY PASS**; F15 rankable 47/50; formula 59.5/25.5/15; F15<->F20 Top-10 8/10; Spearman **0.986**; 23 NORMAL / 12 MATERIAL / 12 HIGH IMPACT; median |F15 F impact| **4.14 pts**; hard score cap **NONE**.
-
-**Official buckets:** 0 ACTIONABLE NOW + 14 TECH+EVENT CHECK + 51 A-QUALITY-WAIT + 1 WAIT/ENTRY NOT READY + 5 DEVELOPING + 3 AVOID/BROKEN = **74/74**.
-
-### Freeze conclusion
-
-Both universes passed the live integrity and official-decision-path invariants. V1.2.3c is frozen as an auditable **shadow Composite architecture**, not as a proven trading edge and not as production ranking authority.
+Final S&P 500 and Russell 2000 live acceptance passed formula/precision integrity, Fundamental coverage, official bucket reconciliation and official-decision-path isolation. V1.2.3c is frozen as an auditable shadow Composite architecture, not as a proven trading edge and not as production ranking authority.
 
 ---
 
@@ -330,16 +295,9 @@ Both universes passed the live integrity and official-decision-path invariants. 
 
 Contextual Volume Quality had been retained as an outstanding research item, but it was not promoted into the formal GitHub roadmap as a named stage. After V1.2.3c acceptance, development followed the formal roadmap mechanically and decomposed V1.3 around entry location/trigger/R:R without first reconciling unresolved research items.
 
-The existing code already contained rudimentary volume logic, which made the omission easier to miss: breakout confirmation used relative-volume expansion and pullback/VCP logic gave a small benefit for contraction. That was not equivalent to a complete Contextual Volume Quality engine.
-
 ## 4.2 Root cause
 
-Two planning layers were not formally reconciled:
-
-1. research/backlog decisions retained from development discussions;
-2. the formal GitHub roadmap.
-
-An item could therefore remain known but unmapped.
+Two planning layers were not formally reconciled: research/backlog decisions retained from development discussions and the formal GitHub roadmap.
 
 ## 4.3 Corrective action
 
@@ -369,25 +327,9 @@ V1.3 is decomposed as:
 
 ## 5.1 Objective
 
-Create a setup-aware volume evidence layer that distinguishes:
+Create a setup-aware volume evidence layer that distinguishes breakout participation/expansion, pullback/VCP/tight-base contraction, accumulation versus distribution, constructive versus conflicting price-volume behavior, and trustworthy versus insufficient volume data.
 
-- breakout participation/expansion;
-- pullback/VCP/tight-base contraction;
-- accumulation versus distribution;
-- constructive versus conflicting price-volume behavior;
-- trustworthy versus insufficient volume data.
-
-The first accepted architecture remains **SHADOW ONLY**.
-
-## 5.2 Architectural boundary
-
-> **Liquidity Quality != Contextual Volume Quality.**
-
-Liquidity answers whether a security is tradeable efficiently. Contextual Volume Quality asks whether participation confirms or contradicts the current setup/entry.
-
-Volume Quality belongs downstream near Setup/Entry, not inside F15 Composite.
-
-## 5.3 Implemented architecture
+## 5.2 Implemented architecture
 
 The accepted V1.3a layer:
 
@@ -396,165 +338,273 @@ The accepted V1.3a layer:
 - excludes the same-day daily bar before **16:30 ET**;
 - uses explicit HIGH / MEDIUM / LOW Volume Data Confidence;
 - makes LOW confidence **NOT RANKED**, not neutral;
-- calculates completed-session RVOL versus the prior 20 sessions;
-- calculates non-overlapping 5D and 10D volume trends;
-- calculates 10D up/down-volume ratio and up-volume share;
-- counts accumulation and distribution sessions;
+- calculates completed-session RVOL versus prior 20 sessions and non-overlapping 5D/10D volume trends;
+- measures up/down-volume participation, up-volume share, accumulation and distribution sessions;
 - interprets breakout expansion differently from pullback/VCP contraction;
 - prevents favorable volume from rescuing broken price structure;
-- returns a separate shadow table;
-- does not write new volume features back into the official scored frame;
-- does not create a 0-100 Volume Quality score.
+- returns a separate shadow table and creates no 0-100 Volume Quality score.
 
-## 5.4 Offline implementation validation
+## 5.3 Validation
 
 - `py_compile`: PASS.
 - Dedicated V1.3a unit/integration suite: **22/22 PASS**.
-- Tests covered completed-session handling, immutability, prior-20 RVOL baseline, setup-specific interpretation, LOW-confidence behavior, distribution accounting, app integration and no-merge/official-layer isolation.
-- The isolated packaging environment did **not** run the entire pre-existing repository regression suite; this is stated explicitly rather than implied.
+- S&P 500 machine-readable reconciliation: **127/127 exact population**, duplicates 0, official bucket/setup/CQ/EQ mismatches 0, 127/127 HIGH confidence.
+- Russell controlled same-session reconciliation: **85/85 exact population**, duplicates 0, official bucket/setup/CQ/EQ mismatches 0, 85/85 HIGH confidence.
 
-## 5.5 S&P 500 live validation
-
-**Controls:** S&P 500 / STRICT / min $5 / prev-day $vol $20M / max deep scan 2000 / strict event gate ON.
-
-Full Swing Candidates and full Contextual Volume Diagnostic CSVs were reconciled programmatically:
-
-- **127 official candidates / 127 contextual rows**;
-- **127 unique symbols**, duplicates **0**;
-- population match **127/127**;
-- official bucket mismatches **0**;
-- official setup mismatches **0**;
-- Candidate Quality mismatches **0**;
-- Entry Quality mismatches **0**;
-- Volume Data Confidence **127/127 HIGH**;
-- evaluation session **2026-09-04** for all rows;
-- state reconciliation: **41 CONFIRMING + 38 MIXED + 34 DIAGNOSTIC ONLY + 14 CONFLICT/WATCH = 127**;
-- context reconciliation: **83 EMA20 PULLBACK + 35 NO CLEAN SETUP + 4 BREAKOUT + 4 MA20 REPAIR + 1 TIGHT BASE = 127**.
-
-The sample demonstrated that the new layer is contextual rather than a simple high-volume reward. Pullback names could confirm through contraction, while breakouts demanded participation. Borderline cases were retained for later outcome calibration rather than used to loosen rules.
-
-## 5.6 Russell 2000 live validation
-
-The final controlled Russell run was taken before U.S. pre-market so both legacy and V1.3a volume metrics referenced the same completed session.
-
-Full machine-readable reconciliation:
-
-- **85 official candidates / 85 contextual rows**;
-- **85 unique symbols**, duplicates **0**;
-- population match **85/85**;
-- official bucket mismatches **0**;
-- official setup mismatches **0**;
-- Candidate Quality mismatches **0**;
-- Entry Quality mismatches **0**;
-- Volume Data Confidence **85/85 HIGH**;
-- evaluation session **2026-09-10** for all rows;
-- state reconciliation: **24 CONFIRMING + 11 MIXED + 13 CONFLICT/WATCH + 37 DIAGNOSTIC ONLY = 85**;
-- context reconciliation: **39 EMA20 PULLBACK + 24 NO CLEAN SETUP + 12 MA20 REPAIR + 5 BREAKOUT + 3 BROKEN/BELOW MA50 + 2 VCP/TIGHTENING = 85**.
-
-## 5.7 Session-comparability finding
+## 5.4 Session-comparability finding
 
 ### Symptom
 
-During an intraday Russell run, frozen official `vol_ratio` and V1.3a `rvol_20` differed dramatically for some stocks. The discrepancy could have been misread as a formula defect.
+During an intraday Russell run, frozen official `vol_ratio` and V1.3a `rvol_20` differed dramatically for some stocks.
 
 ### Root cause
 
-The two metrics were sometimes observing different session completeness:
-
-- frozen `vol_ratio` uses the latest available daily-bar volume divided by the prior-20-session average;
-- V1.3a deliberately excludes the same-day daily bar before 16:30 ET and evaluates the latest completed session.
-
-Comparing partial-day volume with a completed-session baseline is not like-for-like.
+The two metrics were sometimes observing different session completeness: the frozen metric could use the latest partial daily bar, while V1.3a deliberately excluded a same-day bar before 16:30 ET.
 
 ### Corrective action / evidence
 
-Three live timing samples were compared:
-
-| Timing condition | Pearson correlation | Evidence |
-|---|---:|---|
-| Regular session / partial bar present | ~0.043 | severe session mismatch |
-| Pre-market/session-mismatch sample | ~0.580 | partial alignment |
-| **Controlled same-completed-session sample** | **0.999966** | metrics effectively reconcile |
-
-For the controlled 85-stock run:
-
-- Spearman: **0.999790**;
-- mean official `vol_ratio`: **0.98847x**;
-- mean V1.3a `rvol_20`: **0.98859x**;
-- **85/85 matched at two-decimal precision**.
+A controlled same-completed-session sample produced Pearson **0.999966**, Spearman **0.999790**, and **85/85 two-decimal matches**.
 
 ### Prevention rule
 
-Session completeness must be explicit in all future volume validation. A future intraday participation metric must compare current time-of-day volume against historical time-of-day volume or another like-for-like pace baseline. V1.3a does **not** silently rewrite the frozen legacy metric.
+Session completeness must be explicit in future volume validation. Any future intraday participation metric must compare like-for-like time-of-day participation.
 
-## 5.8 Acceptance decision
+## 5.5 Acceptance decision
 
-V1.3a is **ACCEPTED / FROZEN as a SHADOW diagnostic architecture**.
-
-Accepted:
-
-- completed-session discipline;
-- Volume Data Confidence;
-- price-context-first design;
-- contextual expansion versus contraction;
-- accumulation/distribution diagnostics;
-- separate shadow-table architecture;
-- cross-universe official-layer isolation;
-- fail-visible behavior.
-
-Not authorized:
-
-- 0-100 Volume Quality score;
-- Candidate Quality/F15 weighting;
-- official Entry Quality modification;
-- production trade gate;
-- threshold optimization based on limited live samples.
-
-Trading expectancy remains unproven and belongs to V1.7.
+V1.3a is **ACCEPTED / FROZEN as a SHADOW diagnostic architecture**. Trading expectancy and threshold optimality remain unproven and belong to V1.7.
 
 ---
 
-# 6. Process Gap Review - Quantitative Validation Evidence
+# 6. V1.3b - Entry Location & Anti-Chase Foundation
 
-## 6.1 Symptom
+**Status:** **ACCEPTED / FROZEN (SHADOW) - 11 Sep 2026**  
+**ADR:** `docs/architecture/ADR-003-entry-location-anti-chase-v13b.md`
+
+## 6.1 Objective
+
+Expose continuous deterioration in entry location **before** the existing frozen binary NO CHASE gate is crossed, while preserving the hard ceiling itself.
+
+The design answers a different question from Candidate Quality:
+
+> **How much anti-chase headroom is left at the current location?**
+
+A strong stock can still be a poor entry when extension has consumed most of the available headroom.
+
+## 6.2 Problem / trigger
+
+The pre-V1.3b anti-chase gate already used three hard ceilings:
+
+- EMA8 extension > **5.0%**;
+- EMA20 extension > **8.0%**;
+- EMA20 extension > **2.0 ATR**.
+
+This is effective for rejecting a clear chase, but it is binary. A stock at 99% of a ceiling and a stock at 20% of a ceiling are both technically "not chase" until the strict `>` breach occurs.
+
+### Root cause
+
+The production architecture contained a hard safety gate but no transparent continuous location measure tied to that gate.
+
+### Corrective action
+
+V1.3b adds a separate SHADOW diagnostic table that converts each positive extension axis into percentage pressure against the existing frozen ceiling and reports remaining headroom.
+
+### Prevention rule
+
+A hard ceiling must not be interpreted as an ideal target. Future entry architecture should preserve the hard NO CHASE ceiling while separately measuring deterioration before the ceiling.
+
+## 6.3 Implemented architecture
+
+The accepted V1.3b calculations are:
+
+- `EMA8 pressure = 100 x max(0, ext_ema8_pct) / 5.0`;
+- `EMA20 pressure = 100 x max(0, ext_ema20_pct) / 8.0`;
+- `ATR pressure = 100 x max(0, ext_atr) / 2.0`;
+- `max_chase_pressure_pct = max(EMA8 pressure, EMA20 pressure, ATR pressure)`;
+- `hard_ceiling_headroom_pct = 100 - max_chase_pressure_pct`.
+
+The dominant extension axis is explicitly shown.
+
+**100% pressure is exactly at a frozen ceiling.** The official hard gate remains strict `>`, so exactly at a ceiling is not a breach. Any axis above 100% independently constitutes hard NO CHASE.
+
+## 6.4 Shadow states
+
+The reference diagnostic states are:
+
+- **REPAIR / BELOW EMA20:** EMA20 extension < -1.5%;
+- **PRIME / CONTROLLED:** max pressure <= 40% and EMA20 extension <= 3.0%;
+- **ACCEPTABLE:** max pressure <= 65%;
+- **STRETCHED:** max pressure <= 85%;
+- **VERY LATE / AT CEILING:** non-hard condition above the STRETCHED band, including exactly at a ceiling;
+- **NO CHASE — HARD CEILING:** one or more frozen official ceilings exceeded;
+- **NOT RANKED:** required extension inputs are incomplete.
+
+These bands are frozen only as the **V1.3b shadow reference architecture**. They are not claimed to be expectancy-optimal production thresholds.
+
+## 6.5 Integrity / isolation design
+
+- V1.3b deep-copies/reads the official scored population and builds a separate diagnostic table.
+- It does not alter Candidate Quality, F15, official Entry Quality, ranking, buckets, event gates or trade decisions.
+- It independently recomputes hard NO CHASE and compares it with the frozen official `chase_reasons` result.
+- Required missing inputs produce **NOT RANKED / LOW confidence** rather than neutral imputation.
+- No 0-100 production Entry Location score exists.
+
+## 6.6 Offline validation
+
+- `py_compile`: PASS.
+- Targeted V1.3b unit/regression/integration validation: **53/53 PASS**.
+- Offline replay on prior accepted machine-readable S&P and Russell samples achieved complete hard-NO-CHASE parity and official-field reconciliation. The replay was used as engineering smoke evidence only, not as live acceptance.
+
+## 6.7 S&P 500 live validation
+
+**Controls:** S&P 500 / STRICT / min $5 / prev-day $vol $20M / max deep scan 2000.
+
+Full Swing Candidates and full Entry Location CSVs were reconciled programmatically:
+
+- **119 official candidates / 119 Entry Location rows**;
+- **119/119 exact symbol population match**;
+- duplicate symbols **0**;
+- official bucket mismatches **0**;
+- official setup mismatches **0**;
+- Candidate Quality mismatches **0**;
+- Entry Quality mismatches **0**;
+- Location Data Confidence **119/119 HIGH**;
+- independent hard NO CHASE parity **119/119 PASS**;
+- states: **68 PRIME/CONTROLLED + 11 ACCEPTABLE + 6 STRETCHED + 4 VERY LATE + 25 REPAIR + 5 HARD NO CHASE = 119**;
+- near-ceiling non-hard watch (75%-<100% pressure): **5**;
+- official ACTIONABLE/TECH ACTIONABLE names already STRETCHED/VERY LATE: **0 - not observed**.
+
+Representative near-ceiling cases:
+
+| Symbol | Max pressure | State |
+|---|---:|---|
+| DVN | 95.62% | VERY LATE |
+| CVX | 94.81% | VERY LATE |
+| HPQ | 94.77% | VERY LATE |
+| COP | 93.03% | VERY LATE |
+| ELV | 79.80% | STRETCHED |
+
+Hard NO CHASE names in this sample were SWKS, VLO, META, PSX and MPC, each independently breaching at least one frozen ceiling.
+
+## 6.8 Russell 2000 live validation
+
+**Controls:** Russell 2000 (IWM proxy) / STRICT / min $5 / prev-day $vol $20M / max deep scan 2000 / strict earnings-event gate ON.
+
+Machine-readable reconciliation:
+
+- **85 official candidates / 85 Entry Location rows**;
+- **85/85 exact symbol population match**;
+- duplicate symbols **0**;
+- official bucket mismatches **0**;
+- official setup mismatches **0**;
+- Candidate Quality mismatches **0**;
+- Entry Quality mismatches **0**;
+- Location Data Confidence **85/85 HIGH**;
+- independent hard NO CHASE parity **85/85 PASS**;
+- states: **36 PRIME/CONTROLLED + 16 ACCEPTABLE + 10 STRETCHED + 5 VERY LATE + 12 REPAIR + 6 HARD NO CHASE = 85**;
+- near-ceiling non-hard watch (75%-<100% pressure): **10**;
+- official ACTIONABLE/TECH ACTIONABLE names already STRETCHED/VERY LATE: **0 - not observed**.
+
+Representative near-ceiling cases:
+
+| Symbol | Max pressure | State |
+|---|---:|---|
+| CRGY | **99.56%** | VERY LATE |
+| TXG | 98.85% | VERY LATE |
+| ANF | 94.70% | VERY LATE |
+| CRC | 90.44% | VERY LATE |
+| AVAH | 90.02% | VERY LATE |
+| PTEN | 79.65% | STRETCHED |
+| PBF | 78.52% | STRETCHED |
+| TDS | 78.36% | STRETCHED |
+| SM | 77.39% | STRETCHED |
+| TARS | 75.35% | STRETCHED |
+
+Hard NO CHASE names were ASO, CVI, SIG, CLMT, DHT and ATRC.
+
+### CRGY canonical example
+
+CRGY consumed **99.56%** of its most restrictive frozen ceiling, leaving only **0.44% normalized headroom**, yet the frozen binary gate correctly remained "not chase" because the ceiling had not actually been exceeded.
+
+This is the architectural distinction V1.3b was designed to expose:
+
+> **Not yet a hard breach does not mean good entry location.**
+
+## 6.9 Cross-universe result
+
+The Russell sample showed greater extension pressure than the S&P sample:
+
+| Measure | S&P 500 | Russell 2000 |
+|---|---:|---:|
+| Hard NO CHASE | 5/119 = 4.2% | 6/85 = 7.1% |
+| Near ceiling 75%-<100% | 5/119 = 4.2% | 10/85 = 11.8% |
+| Non-hard STRETCHED + VERY LATE | 10/119 = 8.4% | 15/85 = 17.6% |
+
+The cross-universe difference is accepted as useful diagnostic information. It is not interpreted as proof of predictive return value.
+
+## 6.10 Acceptance decision
+
+V1.3b is **ACCEPTED / FROZEN as a SHADOW Entry Location / Anti-Chase architecture**.
+
+Accepted:
+
+- continuous EMA8 / EMA20 / ATR pressure measurement;
+- dominant extension axis;
+- explicit remaining headroom;
+- separate REPAIR treatment;
+- exact preservation of the existing strict hard NO CHASE semantics;
+- independent hard-gate parity;
+- official-layer isolation;
+- fail-visible NOT RANKED behavior;
+- cross-universe machine-readable validation.
+
+Not authorized:
+
+- relaxing/replacing frozen hard NO CHASE ceilings;
+- modifying official Entry Quality;
+- automatic official bucket downgrades from shadow bands;
+- a new production Entry Location score;
+- claiming PRIME/ACCEPTABLE/STRETCHED/VERY LATE bands are expectancy-optimal.
+
+Trading outcome value and band calibration remain V1.7 dependencies.
+
+---
+
+# 7. Process Gap Review - Quantitative Validation Evidence
+
+## 7.1 Symptom
 
 Earlier live validation relied too heavily on screenshots, including wide diagnostic tables. Screenshots were useful for deployment proof but inefficient and insufficient for full row-level reconciliation.
 
-A concrete example occurred when the dashboard headline showed **41 CONFIRMING** while the displayed/exported confirming table contained **40 rows** because the UI intentionally used a display cap. The full diagnostic audit correctly contained all 41.
+A concrete V1.3a example occurred when the dashboard headline showed **41 CONFIRMING** while the displayed/exported confirming table contained **40 rows** because the UI intentionally used a display cap. The full diagnostic audit correctly contained all 41.
 
-## 6.2 Root cause
+## 7.2 Root cause
 
-Two evidence purposes were conflated:
+Two evidence purposes were conflated: **UI/deployment acceptance** and **quantitative engine acceptance**.
 
-1. **UI/deployment acceptance**;
-2. **quantitative engine acceptance**.
+## 7.3 Corrective action
 
-A screenshot can prove that a section rendered and a headline count appeared, but it cannot efficiently prove full-population equality, hidden columns, duplicates, nulls, threshold behavior or exact numeric reconciliation.
-
-## 6.3 Corrective action
-
-The project adopts the **Validation Evidence Standard**:
+The project uses the **Validation Evidence Standard**:
 
 - screenshots: version/settings/banner/headline/UI proof;
 - full CSV/machine-readable data: quantitative analysis and freeze evidence;
 - programmatic reconciliation: row counts, population identity, frozen-layer equality, duplicates, nulls, states, confidence and session alignment.
 
-## 6.4 Prevention rule
+## 7.4 Prevention rule
 
 A quantitative engine cannot be frozen from screenshots alone when complete machine-readable evidence is available. Display caps must never be mistaken for population caps.
 
 ---
 
-# 7. Outstanding Research / Dependency Register
+# 8. Outstanding Research / Dependency Register
 
-The register is now reconciled to one canonical ID set shared with `ROADMAP.md`.
+The register is reconciled to one canonical ID set shared with `ROADMAP.md`.
 
 | ID | Item | Disposition | Destination | Rule |
 |---|---|---|---|---|
 | R-001 | Contextual Volume Quality diagnostics architecture | **RESOLVED / FROZEN SHADOW** | **V1.3a** | Architecture accepted; outcome calibration remains V1.7 work |
 | R-002 | Candidate-vs-Entry feature separation | ASSIGNED | V1.3b-V1.3e | Preserve separate truth layers |
-| R-003 | Continuous EMA8/EMA20 extension/location quality | ASSIGNED | V1.3b | Hard NO CHASE remains a ceiling |
-| R-004 | Trigger and entry-zone architecture | ASSIGNED | V1.3c | Do not assume current close is the planned entry |
+| R-003 | Continuous EMA8/EMA20 extension/location quality | **RESOLVED / FROZEN SHADOW** | **V1.3b** | Continuous pressure/headroom accepted; production threshold value remains V1.7 work |
+| R-004 | Trigger and entry-zone architecture | **ASSIGNED** | **V1.3c** | Do not assume current close is the planned entry |
 | R-005 | Stop-distance / prospective R:R | ASSIGNED | V1.3d | Evaluate edge before actionability |
 | R-006 | ACTIONABLE-A/B/C staged execution | DEFERRED / PREP | V1.3f -> V1.6/V1.8 | Fixed total portfolio risk |
 | R-007 | Signal Capture Rate / Missed Opportunity R | ASSIGNED | V1.3f -> V1.7 | Start prospective logging; diagnostics underneath expectancy |
@@ -565,10 +615,11 @@ The register is now reconciled to one canonical ID set shared with `ROADMAP.md`.
 | R-012 | Relative-strength level/direction/resilience | RESOLVED / VALIDATE LATER | V1.2.1 + V1.7 | Architecture frozen; outcome validation later |
 | **R-013** | **Trading expectancy / edge validation** | **ASSIGNED** | **V1.7** | **Central KPI using Backtest + Forward-Test evidence** |
 | R-014 | READY / WATCH / WAIT / NO CHASE mapping | ASSIGNED | V1.3e | Decision-first output |
+| R-015 | Entry Location band expectancy / calibration | DEFERRED / VALIDATE | V1.7 | Validate outcome separation before production authority |
 
 ---
 
-# 8. CF Case Study #001 - Execution Architecture Lesson
+# 9. CF Case Study #001 - Execution Architecture Lesson
 
 CF was found early, passed ACTIONABLE and the key resistance/trigger area around $133 was identified, but execution capture failed. The lesson is not to loosen standards. It is to convert hindsight regret into execution architecture:
 
@@ -584,15 +635,45 @@ Retained roadmap dependencies:
 - Signal Capture Rate and Missed Opportunity R;
 - formal expectancy validation.
 
-**Prove Edge** is now explicitly defined as outcome validation using **Backtest + Forward-Test expectancy evidence**. Signal Capture Rate and Missed Opportunity R explain execution capture; they do not replace expectancy.
+**Prove Edge** is explicitly defined as outcome validation using **Backtest + Forward-Test expectancy evidence**. Signal Capture Rate and Missed Opportunity R explain execution capture; they do not replace expectancy.
 
-These dependencies remain staged into V1.3f/V1.6/V1.7/V1.8 rather than being forced into V1.3b.
+These dependencies remain staged into V1.3f/V1.6/V1.7/V1.8 rather than being forced into V1.3c.
 
 ---
 
-# 9. Planned V1.7 - Expectancy Validation / Backtest / Forward-Test Lab
+# 10. Planned V1.3c - Trigger & Entry-Zone Architecture
 
-## 9.1 Governing question
+## 10.1 Governing problem
+
+The current scanner still relies heavily on the current close as the practical entry reference. V1.3b tells us whether the current location is early or late, but it does not yet define **where a trade should actually be entered**.
+
+V1.3c must separate:
+
+- current observed price;
+- planned entry zone;
+- breakout/pullback trigger level;
+- confirmation condition;
+- maximum acceptable fill/chase boundary.
+
+The goal is not to manufacture more trades. It is to make execution intent explicit before V1.3d evaluates stop distance and prospective R:R.
+
+## 10.2 Frozen dependencies entering V1.3c
+
+V1.3c must preserve:
+
+- Candidate Quality / Composite separation;
+- V1.3a Contextual Volume shadow architecture;
+- V1.3b hard NO CHASE ceilings and shadow location pressure/headroom;
+- official decision path unless/until a later phase explicitly promotes new logic;
+- NO TRADE as a valid outcome.
+
+V1.3c should begin in **SHADOW** and be validated with machine-readable exports before any production influence is considered.
+
+---
+
+# 11. Planned V1.7 - Expectancy Validation / Backtest / Forward-Test Lab
+
+## 11.1 Governing question
 
 > **Does the system produce positive, repeatable trading expectancy after realistic execution friction and missed opportunities?**
 
@@ -602,7 +683,7 @@ Basic R-multiple reference:
 
 `Expectancy = Win Rate x Average Win (R) - Loss Rate x Average Loss (R)`
 
-## 9.2 Expectancy hierarchy
+## 11.2 Expectancy hierarchy
 
 | Layer | Purpose |
 |---|---|
@@ -615,43 +696,17 @@ Basic R-multiple reference:
 
 A high Signal Capture Rate of a negative-expectancy strategy is failure. Positive Signal Expectancy with weak capture points to execution leakage.
 
-## 9.3 Backtest role
+## 11.3 Backtest role
 
-Backtesting should provide historical breadth and regime coverage while controlling for:
-
-- look-ahead leakage;
-- timestamp-correct feature availability;
-- unrealistic fill assumptions;
-- slippage/transaction costs;
-- in-sample overfitting;
-- no-fill/gap-through/invalidation cases;
-- regime/setup/universe concentration.
+Backtesting should provide historical breadth and regime coverage while controlling for look-ahead leakage, timestamp correctness, unrealistic fills, slippage/transaction costs, in-sample overfitting, no-fill/gap-through/invalidation cases and regime/setup/universe concentration.
 
 Use out-of-sample / walk-forward evidence and robustness/sensitivity analysis.
 
-## 9.4 Forward-test role
+## 11.4 Forward-test role
 
-V1.3f begins prospective logging before V1.7. Preserve at minimum:
+V1.3f begins prospective logging before V1.7. Preserve at minimum signal timestamp, setup/context, Candidate Quality, relevant Leadership/Fundamental/Composite states, Entry Quality, Contextual Volume state, Entry Location pressure/state/headroom, planned entry/zone/trigger, stop/targets, event/regime state, trigger time, fill/no-fill, slippage, invalidated-before-entry, MAE/MFE, exit path, realized R and Missed Opportunity R.
 
-- signal timestamp;
-- setup/context;
-- Candidate Quality;
-- relevant Leadership/Fundamental/Composite states;
-- Entry Quality;
-- Contextual Volume state;
-- planned entry/zone/trigger;
-- stop and targets;
-- event/regime state;
-- trigger time;
-- fill/no-fill;
-- slippage;
-- invalidated-before-entry;
-- MAE/MFE;
-- exit path;
-- realized R;
-- Missed Opportunity R.
-
-## 9.5 Acceptance discipline
+## 11.5 Acceptance discipline
 
 A positive point estimate alone is insufficient. Evaluate sample size, dispersion, confidence intervals/bootstrap ranges where practical, drawdown, stability across time/universes/regimes/setups and sensitivity to realistic execution assumptions.
 
@@ -659,22 +714,25 @@ Conditional expectancy should be evaluated by relevant system state to discover 
 
 ---
 
-# 10. Known Limitations & Open Risks
+# 12. Known Limitations & Open Risks
 
 1. F15 architecture mechanics are accepted, but production ranking authority remains shadow-only pending outcome evidence.
 2. V1.3a contextual-volume architecture is accepted, but its thresholds are not proven to improve trading expectancy.
 3. V1.3a has no authorized 0-100 score and no production Entry/Candidate weighting.
-4. The frozen legacy `vol_ratio` can represent a partial latest daily bar intraday; V1.3a deliberately avoids that comparison. A future intraday volume-pace metric requires like-for-like time-of-day evidence.
-5. Fundamental concept coverage can still require sector/domain-specific work.
-6. Event-date reliability remains immature and belongs to V1.5.
-7. Entry Quality remains coarse relative to the planned V1.3b-V1.3e architecture.
-8. Paper execution and trade journaling are not yet established.
-9. Formal Backtest / Forward-Test trading expectancy is not yet proven.
-10. Future recalibration of frozen layers requires explicit new evidence/versioning.
+4. The frozen legacy `vol_ratio` can represent a partial latest daily bar intraday; a future intraday volume-pace metric requires like-for-like time-of-day evidence.
+5. V1.3b Entry Location architecture is accepted, but PRIME/ACCEPTABLE/STRETCHED/VERY LATE are shadow reference bands, not proven expectancy-optimal production gates.
+6. V1.3b does not alter official Entry Quality or buckets.
+7. Official ACTIONABLE/TECH ACTIONABLE names that were already STRETCHED/VERY LATE were **not observed** in the two V1.3b live samples; absence of an example is recorded rather than fabricated.
+8. Trigger and entry-zone architecture is not yet built; current close remains too central until V1.3c.
+9. Fundamental concept coverage can still require sector/domain-specific work.
+10. Event-date reliability remains immature and belongs to V1.5.
+11. Paper execution and trade journaling are not yet established.
+12. Formal Backtest / Forward-Test trading expectancy is not yet proven.
+13. Future recalibration of frozen layers requires explicit new evidence/versioning.
 
 ---
 
-# 11. Version Ledger
+# 13. Version Ledger
 
 | Version | Theme | Status |
 |---|---|---|
@@ -698,11 +756,12 @@ Conditional expectancy should be evaluated by relevant system state to discover 
 | V1.2.3b2 | Pre-revenue integrity | Frozen |
 | **V1.2.3c** | **F15 architecture / explainable impact** | **ACCEPTED / FROZEN** |
 | **V1.3a** | **Contextual Volume Quality Diagnostics** | **ACCEPTED / FROZEN (SHADOW)** |
-| **V1.3b** | **Entry Location & Anti-Chase Foundation** | **NEXT / DESIGN** |
+| **V1.3b** | **Entry Location & Anti-Chase Foundation** | **ACCEPTED / FROZEN (SHADOW)** |
+| **V1.3c** | **Trigger & Entry-Zone Architecture** | **NEXT / DESIGN** |
 
 ---
 
-# 12. Documentation Standard for Future Phases
+# 14. Documentation Standard for Future Phases
 
 Every future major phase record must include:
 
