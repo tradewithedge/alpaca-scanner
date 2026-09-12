@@ -1,0 +1,4227 @@
+import importlib
+import os
+from datetime import datetime, timezone
+
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+
+# -----------------------------------------------------------------------------
+# Streamlit multi-file hot-reload guard.
+# Reload the scanner package modules in dependency order so a GitHub deploy
+# cannot leave app.py running against stale dataclasses / scoring functions.
+# -----------------------------------------------------------------------------
+import scanner.alpaca_client as alpaca_client_module
+import scanner.audit as audit_module
+import scanner.config as scanner_config
+import scanner.indicators as indicators_module
+import scanner.inspector as inspector_module
+import scanner.fundamentals as fundamentals_module
+import scanner.fundamental_validation as fundamental_validation_module
+import scanner.fundamental_batch as fundamental_batch_module
+import scanner.composite_quality as composite_quality_module
+import scanner.composite_robustness as composite_robustness_module
+import scanner.composite_architecture as composite_architecture_module
+import scanner.leadership as leadership_module
+import scanner.volume_quality as volume_quality_module
+import scanner.entry_location as entry_location_module
+import scanner.entry_zone as entry_zone_module
+import scanner.regime as regime_module
+import scanner.scoring as scoring_module
+import scanner.universe as universe_module
+
+for _module in (
+    alpaca_client_module,
+    scanner_config,
+    indicators_module,
+    inspector_module,
+    fundamentals_module,
+    fundamental_validation_module,
+    fundamental_batch_module,
+    composite_quality_module,
+    composite_robustness_module,
+    composite_architecture_module,
+    leadership_module,
+    volume_quality_module,
+    entry_location_module,
+    entry_zone_module,
+    regime_module,
+    scoring_module,
+    universe_module,
+    audit_module,
+):
+    importlib.reload(_module)
+
+AlpacaClient = alpaca_client_module.AlpacaClient
+AlpacaCredentials = alpaca_client_module.AlpacaCredentials
+ScannerConfig = scanner_config.ScannerConfig
+MARKET_SYMBOLS = scanner_config.MARKET_SYMBOLS
+SECTOR_ETFS = scanner_config.SECTOR_ETFS
+QUALITY_PRESETS = scanner_config.QUALITY_PRESETS
+add_indicators = indicators_module.add_indicators
+latest_snapshot = indicators_module.latest_snapshot
+normalize_ticker = inspector_module.normalize_ticker
+resolve_asset = inspector_module.resolve_asset
+in_selected_universe = inspector_module.in_selected_universe
+pct_rank_against_reference = inspector_module.pct_rank_against_reference
+zero_to_100_rank_against_reference = inspector_module.zero_to_100_rank_against_reference
+liquidity_diagnostic = inspector_module.liquidity_diagnostic
+inspector_authority = inspector_module.inspector_authority
+AUTO_REFERENCE_LABEL = inspector_module.AUTO_REFERENCE_LABEL
+resolve_reference_universe = inspector_module.resolve_reference_universe
+reference_signature = inspector_module.reference_signature
+scan_reference_compatible = inspector_module.scan_reference_compatible
+reference_coverage = inspector_module.reference_coverage
+reference_confidence = inspector_module.reference_confidence
+reference_is_usable = inspector_module.reference_is_usable
+fetch_sec_ticker_map = fundamentals_module.fetch_sec_ticker_map
+resolve_sec_identity = fundamentals_module.resolve_sec_identity
+fetch_sec_identity_mirror = fundamentals_module.fetch_sec_identity_mirror
+SEC_IDENTITY_MIRROR_LABEL = fundamentals_module.SEC_IDENTITY_MIRROR_LABEL
+SecAccessError = fundamentals_module.SecAccessError
+SecIdentityNotFound = fundamentals_module.SecIdentityNotFound
+build_sec_declared_user_agent = fundamentals_module.build_sec_declared_user_agent
+classify_sec_transport_failure = fundamentals_module.classify_sec_transport_failure
+fetch_sec_companyfacts = fundamentals_module.fetch_sec_companyfacts
+build_fundamental_snapshot = fundamentals_module.build_fundamental_snapshot
+unavailable_fundamental_snapshot = fundamentals_module.unavailable_snapshot
+normalize_sec_ticker = fundamentals_module.normalize_sec_ticker
+DEFAULT_SEC_USER_AGENT = fundamentals_module.DEFAULT_SEC_USER_AGENT
+FUND_VALIDATION_CASES = fundamental_validation_module.VALIDATION_CASES
+fund_validation_row = fundamental_validation_module.validation_row
+summarize_fund_validation = fundamental_validation_module.summarize_validation_rows
+select_fundamental_batch_candidates = fundamental_batch_module.select_batch_candidates
+fundamental_batch_row = fundamental_batch_module.batch_row
+summarize_fundamental_batch = fundamental_batch_module.summarize_batch_rows
+build_shadow_composite_table = composite_quality_module.build_shadow_composite_table
+summarize_shadow_composite = composite_quality_module.summarize_shadow_composite
+build_composite_robustness_table = composite_robustness_module.build_composite_robustness_table
+summarize_composite_robustness = composite_robustness_module.summarize_composite_robustness
+build_selected_composite_table = composite_architecture_module.build_selected_composite_table
+summarize_selected_composite = composite_architecture_module.summarize_selected_composite
+add_leadership_features = leadership_module.add_leadership_features
+build_contextual_volume_quality = volume_quality_module.build_contextual_volume_quality
+summarize_contextual_volume_quality = volume_quality_module.summarize_contextual_volume_quality
+build_entry_location_diagnostics = entry_location_module.build_entry_location_diagnostics
+summarize_entry_location_diagnostics = entry_location_module.summarize_entry_location_diagnostics
+build_entry_zone_diagnostics = entry_zone_module.build_entry_zone_diagnostics
+summarize_entry_zone_diagnostics = entry_zone_module.summarize_entry_zone_diagnostics
+aggregate_regime = regime_module.aggregate_regime
+with_breadth = regime_module.with_breadth
+build_cross_section = scoring_module.build_cross_section
+apply_quality_filters = scoring_module.apply_quality_filters
+score_universe = scoring_module.score_universe
+UNIVERSE_OPTIONS = universe_module.UNIVERSE_OPTIONS
+fetch_universe = universe_module.fetch_universe
+build_funnel = audit_module.build_funnel
+bucket_integrity = audit_module.bucket_integrity
+liquidity_summary = audit_module.liquidity_summary
+
+
+APP_VERSION = "V1.3c"
+
+st.set_page_config(
+    page_title=f"ALPACA Scanner {APP_VERSION}",
+    page_icon="📈",
+    layout="wide",
+)
+st.title(f"📈 ALPACA Scanner {APP_VERSION}")
+st.caption(
+    "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
+    "• Trade With Edge • V1.3a Volume + V1.3b Entry Location frozen SHADOW baselines • V1.3c Trigger / Entry Zone"
+)
+st.caption(
+    "Roadmap stage: V1.3c Trigger & Entry-Zone Architecture • SHADOW ONLY • "
+    "current price is separated from prior-structure trigger, planned entry zone and maximum acceptable fill • "
+    "V1.3a and V1.3b remain frozen • no change to official Candidate Quality, F15 Composite, Entry Quality, "
+    "legacy entry_px, stops/targets, ranking, buckets, event gates or trade decisions"
+)
+
+
+def secret(name, default=None):
+    try:
+        return st.secrets[name]
+    except Exception:
+        return os.getenv(name, default)
+
+
+@st.cache_resource
+def get_client():
+    key = secret("APCA_API_KEY_ID")
+    sec = secret("APCA_API_SECRET_KEY")
+    if not key or not sec:
+        return None
+
+    return AlpacaClient(
+        AlpacaCredentials(
+            key_id=key,
+            secret_key=sec,
+            paper_base_url=secret(
+                "APCA_PAPER_BASE_URL",
+                "https://paper-api.alpaca.markets",
+            ),
+            data_base_url=secret(
+                "APCA_DATA_BASE_URL",
+                "https://data.alpaca.markets",
+            ),
+            feed=secret("APCA_DATA_FEED", "delayed_sip"),
+            historical_feed=secret("APCA_HISTORICAL_FEED", "sip"),
+        )
+    )
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_assets(_client):
+    return _client.get_assets()
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def load_prev_daily_bars(_client, syms, bs):
+    return _client.get_previous_daily_bars(list(syms), batch_size=bs)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_bars(_client, syms, days, bs):
+    return _client.get_daily_bars(list(syms), days=days, batch_size=bs)
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def load_named_universe(name):
+    return fetch_universe(name)
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def resolve_sec_identity_cached(ticker, user_agent):
+    # Cache the successful per-ticker identity so Streamlit reruns do not
+    # repeatedly download SEC association files.
+    return resolve_sec_identity(
+        ticker,
+        user_agent=user_agent,
+        timeout=12.0,
+    )
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def resolve_sec_identity_mirror_cached(ticker):
+    mapping = fetch_sec_identity_mirror(timeout=15.0)
+    identity = mapping.get(normalize_sec_ticker(ticker))
+    if identity is None:
+        raise SecIdentityNotFound(
+            f"{normalize_sec_ticker(ticker)} was not found in the "
+            "version-pinned SEC-derived identity mirror."
+        )
+    out = dict(identity)
+    out["identity_source"] = SEC_IDENTITY_MIRROR_LABEL
+    out["identity_authority"] = (
+        "SEC-DERIVED MIRROR / FINANCIALS STILL OFFICIAL SEC"
+    )
+    out["identity_access_status"] = "PASS"
+    out["identity_diagnostics"] = (
+        "Official SEC identity route skipped when no declared Fair Access "
+        "contact is configured."
+    )
+    return out
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def load_sec_ticker_map_cached(user_agent):
+    return fetch_sec_ticker_map(
+        user_agent=user_agent,
+        timeout=12.0,
+    )
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def load_sec_companyfacts_cached(cik, user_agent):
+    return fetch_sec_companyfacts(
+        cik,
+        user_agent=user_agent,
+        timeout=15.0,
+    )
+
+
+def load_fundamental_snapshot(symbol):
+    """On-demand official SEC fundamentals; never changes scanner state."""
+    ticker = normalize_sec_ticker(symbol)
+
+    declared = build_sec_declared_user_agent(
+        contact_email=secret("SEC_CONTACT_EMAIL"),
+        explicit_user_agent=secret("SEC_USER_AGENT"),
+        organization=secret("SEC_ORGANIZATION", "TradeWithEdge"),
+    )
+    user_agent = declared.get("user_agent", "")
+
+    try:
+        if declared["ready"]:
+            identity = resolve_sec_identity_cached(ticker, user_agent)
+        else:
+            identity = resolve_sec_identity_mirror_cached(ticker)
+    except SecIdentityNotFound as exc:
+        return unavailable_fundamental_snapshot(
+            ticker,
+            str(exc),
+            sec_access_status="IDENTITY NOT FOUND",
+            fair_access_status=("PASS" if declared["ready"] else "CONFIG REQUIRED"),
+            fair_access_source=declared.get("source"),
+            fair_access_contact=declared.get("contact_email"),
+            companyfacts_transport_diagnosis="NOT ATTEMPTED",
+            identity_access_status="PASS / NOT FOUND",
+            companyfacts_access_status="NOT ATTEMPTED",
+        )
+    except SecAccessError as exc:
+        return unavailable_fundamental_snapshot(
+            ticker,
+            exc.compact(),
+            sec_access_status="SEC IDENTITY ACCESS FAILED",
+            fair_access_status=("PASS" if declared["ready"] else "CONFIG REQUIRED"),
+            fair_access_source=declared.get("source"),
+            fair_access_contact=declared.get("contact_email"),
+            companyfacts_transport_diagnosis="NOT ATTEMPTED",
+            identity_access_status="FAILED",
+            companyfacts_access_status="NOT ATTEMPTED",
+            identity_diagnostics=exc.compact(),
+        )
+
+    if not declared["ready"]:
+        return unavailable_fundamental_snapshot(
+            ticker,
+            declared["reason"],
+            cik=identity["cik"],
+            company_name=identity.get("title"),
+            sec_access_status="SEC FAIR ACCESS CONFIG REQUIRED",
+            fair_access_status="CONFIG REQUIRED",
+            fair_access_source=declared.get("source"),
+            fair_access_contact=None,
+            companyfacts_transport_diagnosis="NOT ATTEMPTED",
+            identity_access_status="PASS",
+            companyfacts_access_status="NOT ATTEMPTED",
+            identity_source=identity.get("identity_source"),
+            identity_authority=identity.get("identity_authority"),
+            identity_diagnostics=identity.get("identity_diagnostics", ""),
+        )
+
+    try:
+        companyfacts = load_sec_companyfacts_cached(identity["cik"], user_agent)
+    except SecAccessError as exc:
+        diagnosis = classify_sec_transport_failure(
+            stage=exc.stage,
+            status_code=exc.status_code,
+            declaration_ready=True,
+        )
+        return unavailable_fundamental_snapshot(
+            ticker,
+            exc.compact(),
+            cik=identity["cik"],
+            company_name=identity.get("title"),
+            sec_access_status="SEC COMPANYFACTS ACCESS FAILED",
+            fair_access_status="PASS",
+            fair_access_source=declared.get("source"),
+            fair_access_contact=declared.get("contact_email"),
+            companyfacts_transport_diagnosis=diagnosis,
+            identity_access_status="PASS",
+            companyfacts_access_status="FAILED",
+            identity_source=identity.get("identity_source"),
+            identity_authority=identity.get("identity_authority"),
+            identity_diagnostics=identity.get("identity_diagnostics", ""),
+        )
+    except Exception as exc:
+        return unavailable_fundamental_snapshot(
+            ticker,
+            f"Unexpected SEC CompanyFacts failure: {exc}",
+            cik=identity["cik"],
+            company_name=identity.get("title"),
+            sec_access_status="SEC COMPANYFACTS ACCESS FAILED",
+            fair_access_status="PASS",
+            fair_access_source=declared.get("source"),
+            fair_access_contact=declared.get("contact_email"),
+            companyfacts_transport_diagnosis="UNEXPECTED CLIENT FAILURE",
+            identity_access_status="PASS",
+            companyfacts_access_status="FAILED",
+            identity_source=identity.get("identity_source"),
+            identity_authority=identity.get("identity_authority"),
+            identity_diagnostics=identity.get("identity_diagnostics", ""),
+        )
+
+    snapshot = build_fundamental_snapshot(
+        ticker,
+        companyfacts,
+        cik=identity["cik"],
+        company_name=identity.get("title"),
+    )
+    snapshot["identity_source"] = identity.get("identity_source")
+    snapshot["identity_authority"] = identity.get("identity_authority")
+    snapshot["identity_access_status"] = "PASS"
+    snapshot["companyfacts_access_status"] = "PASS"
+    snapshot["sec_access_status"] = "PASS"
+    snapshot["fair_access_status"] = "PASS"
+    snapshot["fair_access_source"] = declared.get("source")
+    snapshot["fair_access_contact"] = declared.get("contact_email")
+    snapshot["companyfacts_transport_diagnosis"] = "PASS"
+    snapshot["identity_diagnostics"] = identity.get("identity_diagnostics", "")
+    return snapshot
+
+
+
+def load_validation_fundamental_snapshot(symbol, identity, declared):
+    """Validation-suite path: reuse one official identity map, fetch facts once."""
+    ticker = normalize_sec_ticker(symbol)
+    user_agent = declared.get("user_agent", "")
+
+    if not declared.get("ready"):
+        return unavailable_fundamental_snapshot(
+            ticker,
+            declared.get("reason") or "SEC Fair Access configuration required",
+            cik=identity.get("cik") if identity else None,
+            sec_access_status="SEC FAIR ACCESS CONFIG REQUIRED",
+            fair_access_status="CONFIG REQUIRED",
+            fair_access_source=declared.get("source"),
+            companyfacts_transport_diagnosis="NOT ATTEMPTED",
+            identity_access_status="PASS" if identity else "UNKNOWN",
+            companyfacts_access_status="NOT ATTEMPTED",
+            identity_source="SEC cached ticker map" if identity else None,
+            identity_authority="OFFICIAL SEC" if identity else None,
+        )
+
+    if not identity:
+        return unavailable_fundamental_snapshot(
+            ticker,
+            "Ticker was not present in the official SEC ticker/CIK map.",
+            sec_access_status="IDENTITY NOT FOUND",
+            fair_access_status="PASS",
+            fair_access_source=declared.get("source"),
+            fair_access_contact=declared.get("contact_email"),
+            companyfacts_transport_diagnosis="NOT ATTEMPTED",
+            identity_access_status="PASS / NOT FOUND",
+            companyfacts_access_status="NOT ATTEMPTED",
+            identity_source="SEC cached ticker map",
+            identity_authority="OFFICIAL SEC",
+        )
+
+    try:
+        companyfacts = load_sec_companyfacts_cached(identity["cik"], user_agent)
+    except SecAccessError as exc:
+        return unavailable_fundamental_snapshot(
+            ticker,
+            exc.compact(),
+            cik=identity["cik"],
+            company_name=identity.get("title"),
+            sec_access_status="SEC COMPANYFACTS ACCESS FAILED",
+            fair_access_status="PASS",
+            fair_access_source=declared.get("source"),
+            fair_access_contact=declared.get("contact_email"),
+            companyfacts_transport_diagnosis=classify_sec_transport_failure(
+                stage=exc.stage,
+                status_code=exc.status_code,
+                declaration_ready=True,
+            ),
+            identity_access_status="PASS",
+            companyfacts_access_status="FAILED",
+            identity_source="SEC cached ticker map",
+            identity_authority="OFFICIAL SEC",
+        )
+
+    snapshot = build_fundamental_snapshot(
+        ticker,
+        companyfacts,
+        cik=identity["cik"],
+        company_name=identity.get("title"),
+    )
+    snapshot["identity_source"] = "SEC cached ticker map"
+    snapshot["identity_authority"] = "OFFICIAL SEC"
+    snapshot["identity_access_status"] = "PASS"
+    snapshot["companyfacts_access_status"] = "PASS"
+    snapshot["sec_access_status"] = "PASS"
+    snapshot["fair_access_status"] = "PASS"
+    snapshot["fair_access_source"] = declared.get("source")
+    snapshot["fair_access_contact"] = declared.get("contact_email")
+    snapshot["companyfacts_transport_diagnosis"] = "PASS"
+    return snapshot
+
+
+def render_fundamental_validation_suite():
+    """Explicit-action V1.2.2.2a1 live SEC cross-company validation utility."""
+    st.subheader(
+        "🧪 V1.2.2.2a1 Annual Horizon & Filing-Form Integrity"
+    )
+    st.caption(
+        "READ-ONLY VALIDATION LAB: this suite does not alter Persistent Quality, "
+        "Candidate Quality, Leadership, Entry Quality, buckets, or trade decisions. "
+        "It checks extraction integrity across deliberately different issuer/reporting profiles."
+    )
+
+    declared = build_sec_declared_user_agent(
+        contact_email=secret("SEC_CONTACT_EMAIL"),
+        explicit_user_agent=secret("SEC_USER_AGENT"),
+        organization=secret("SEC_ORGANIZATION", "TradeWithEdge"),
+    )
+    if not declared.get("ready"):
+        st.warning(
+            "SEC Fair Access declaration is not ready. Configure SEC_CONTACT_EMAIL "
+            "before running the validation suite."
+        )
+        return
+
+    try:
+        with st.spinner("Loading one official SEC ticker/CIK map for the validation suite..."):
+            identity_map = load_sec_ticker_map_cached(declared["user_agent"])
+    except Exception as exc:
+        st.error(f"Validation suite could not load the official SEC identity map: {exc}")
+        return
+
+    rows = []
+    for case in FUND_VALIDATION_CASES:
+        ticker = case["ticker"]
+        with st.spinner(f"Validating {ticker} — {case['profile']}..."):
+            snap = load_validation_fundamental_snapshot(
+                ticker,
+                identity_map.get(normalize_sec_ticker(ticker)),
+                declared,
+            )
+        rows.append(fund_validation_row(case, snap))
+
+    summary = summarize_fund_validation(rows)
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Overall validation", summary["overall"])
+    s2.metric("PASS", summary["pass"])
+    s3.metric("REVIEW", summary["review"])
+    s4.metric("FAIL", summary["fail"])
+
+    if summary["fail"]:
+        st.error(
+            "At least one case has an access or extraction-integrity FAIL. "
+            "Do not promote Fundamental Quality into Candidate Quality."
+        )
+    elif summary["review"]:
+        st.warning(
+            "No extraction FAIL was detected, but at least one profile requires "
+            "REVIEW. In V1.2.2.2a a REVIEW is acceptable only when any stale or "
+            "unresolved concept is BLOCKED from the current metric (N/A), never "
+            "silently substituted with an older period."
+        )
+    else:
+        st.success(
+            "All validation cases passed structural extraction checks. "
+            "This still remains SHADOW MODE until live results are reviewed."
+        )
+
+    st.dataframe(
+        pd.DataFrame(rows),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.caption(
+        "PASS = usable SEC facts with structurally valid period pairing. "
+        "REVIEW = explainable coverage/domain gap or lower confidence. "
+        "FAIL = access failure or a suspicious period pair actually used by the engine."
+    )
+
+
+
+
+def render_fundamental_batch_coverage(scan, sample_size):
+    """Frozen V1.2.2.3 bounded fundamental batch support layer."""
+    if scan is None:
+        st.info(
+            "Run Scanner first. Fundamental batch coverage only evaluates "
+            "persistent-quality symbols from a completed scanner result."
+        )
+        return
+
+    scored = scan.get("scored")
+    if scored is None or scored.empty:
+        st.info("No persistent-quality candidates are available for batch validation.")
+        return
+
+    selected = select_fundamental_batch_candidates(scored, sample_size)
+    if selected.empty:
+        st.info("No symbols were selected for fundamental batch validation.")
+        return
+
+    scan_ts = scan.get("ts")
+    scan_sig = (
+        scan.get("universe_name"),
+        scan_ts.isoformat() if hasattr(scan_ts, "isoformat") else str(scan_ts),
+        int(sample_size),
+        tuple(selected["symbol"].tolist()),
+    )
+
+    cached = st.session_state.get("fund_batch_result")
+    cached_sig = (
+        cached.get("signature")
+        if isinstance(cached, dict)
+        else None
+    )
+
+    if cached_sig != scan_sig:
+        progress = st.progress(
+            0.0,
+            text=(
+                f"Building bounded SEC fundamental reference for "
+                f"{len(selected):,} persistent-quality candidates..."
+            ),
+        )
+        rows = []
+        total = len(selected)
+
+        for i, (_, scanner_row) in enumerate(selected.iterrows(), start=1):
+            symbol = str(scanner_row["symbol"]).upper()
+            progress.progress(
+                i / total,
+                text=f"Loading official SEC fundamentals {i:,}/{total:,}: {symbol}",
+            )
+            try:
+                fund = load_fundamental_snapshot(symbol)
+            except Exception as exc:
+                fund = unavailable_fundamental_snapshot(
+                    symbol,
+                    f"Batch coverage load failed safely: {exc}",
+                    sec_access_status="FAILED",
+                    companyfacts_access_status="FAILED",
+                )
+
+            rows.append(
+                fundamental_batch_row(
+                    scanner_row.to_dict(),
+                    fund,
+                )
+            )
+
+        progress.empty()
+        summary = summarize_fundamental_batch(rows)
+        cached = {
+            "signature": scan_sig,
+            "rows": rows,
+            "summary": summary,
+            "universe_name": scan.get("universe_name"),
+            "sample_size": int(sample_size),
+            "built_at": datetime.now(timezone.utc),
+        }
+        st.session_state.fund_batch_result = cached
+
+    rows = cached.get("rows", [])
+    summary = cached.get("summary", {})
+    table = pd.DataFrame(rows)
+
+    st.subheader("3C) Fundamental Universe Coverage — Shadow Batch")
+    st.info(
+        "V1.2.2.3 FROZEN FUNDAMENTAL REFERENCE: this bounded audited SEC sample "
+        "is the accepted input to V1.2.3b2 domain-integrity validation. It does NOT "
+        "alter Candidate Quality, Leadership, Fundamental Quality, scanner "
+        "ranking, candidate buckets, Entry Quality, or trade decisions."
+    )
+    st.caption(
+        "Scope discipline: fundamentals are fetched only for already "
+        "persistent-quality candidates, never for the full raw U.S. universe. "
+        "Official SEC identity and CompanyFacts caches are reused."
+    )
+
+    b1, b2, b3, b4, b5, b6 = st.columns(6)
+    b1.metric("Sample requested", f"{summary.get('total', 0):,}")
+    b2.metric("CompanyFacts PASS", f"{summary.get('companyfacts_pass', 0):,}")
+    b3.metric("Integrity PASS", f"{summary.get('integrity_pass', 0):,}")
+    b4.metric("REVIEW", f"{summary.get('review', 0):,}")
+    b5.metric("FAIL", f"{summary.get('fail', 0):,}")
+    b6.metric(
+        "Usable coverage",
+        f"{summary.get('usable_coverage_pct', 0.0):.1f}%",
+    )
+
+    if summary.get("fail", 0):
+        st.error(
+            "Fundamental batch validation has one or more FAIL results. "
+            "Do not proceed to composite Candidate Quality integration."
+        )
+    elif summary.get("usable_coverage_pct", 0.0) < 90.0:
+        st.warning(
+            "No hard extraction FAIL was detected, but usable fundamental "
+            "coverage is below the 90% promotion threshold. Continue coverage "
+            "validation before composite integration."
+        )
+    else:
+        st.success(
+            "Bounded fundamental reference achieved ≥90% usable coverage with "
+            "no hard extraction FAIL. This is a prerequisite—not yet permission—"
+            "to change official Candidate Quality."
+        )
+
+    if summary.get("median_fundamental_score") is not None:
+        c1, c2, c3 = st.columns(3)
+        c1.metric(
+            "Median Fundamental Quality",
+            f"{summary['median_fundamental_score']:.1f}/100",
+        )
+        c2.metric(
+            "A / A+ fundamentals",
+            f"{summary.get('a_or_better', 0):,}",
+        )
+        c3.metric(
+            "Low/unknown data confidence",
+            f"{summary.get('low_unknown_confidence', 0):,}",
+        )
+
+    display_cols = [
+        "symbol",
+        "official_candidate_quality",
+        "leadership_score",
+        "fundamental_score",
+        "fundamental_grade",
+        "fundamental_confidence",
+        "metric_coverage_pct",
+        "metric_integrity",
+        "companyfacts",
+        "revenue_q_yoy",
+        "earnings_q_yoy_state",
+        "latest_filing",
+        "batch_status",
+        "interpretation",
+    ]
+    st.dataframe(
+        table[[c for c in display_cols if c in table.columns]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.caption(
+        "Selection order = official Candidate Quality descending, then "
+        "Leadership Score, then Legacy RS. This frozen V1.2.2.3 sample is the "
+        "audited input to V1.2.3c selected-architecture shadow validation; official scanner order remains unchanged."
+    )
+
+    st.divider()
+    render_shadow_composite_calibration(table)
+
+    st.divider()
+    render_composite_robustness_calibration(table)
+
+    st.divider()
+    render_selected_composite_architecture(table)
+
+
+
+def render_shadow_composite_calibration(batch_table):
+    """V1.2.3a shadow attribution; formulas unchanged, attribution improved."""
+    if batch_table is None or batch_table.empty:
+        st.info(
+            "Build a Fundamental Batch Coverage sample first. Attribution uses "
+            "that same audited sample and makes no additional SEC calls."
+        )
+        return
+
+    composite = build_shadow_composite_table(batch_table)
+    summary = summarize_shadow_composite(composite)
+
+    st.subheader(
+        "3D) Composite Candidate Quality — Attribution & Shadow Calibration"
+    )
+    st.info(
+        "V1.2.3a SHADOW MODE: the F10/F20/F30 formulas are unchanged. This patch "
+        "separates the effect of Leadership from the incremental effect of "
+        "Fundamental Quality. Official Candidate Quality, scanner ranking, "
+        "buckets, Entry Quality and trade decisions remain unchanged."
+    )
+    st.caption(
+        "Attribution chain: Official Candidate Quality → No-Fund Reference "
+        "(70% CQ + 30% Leadership) → F10/F20/F30. Positive rank impact means "
+        "promotion; negative means demotion. Fundamental impact is measured "
+        "from No-Fund, never directly from Official Candidate Quality."
+    )
+
+    w1, w2, w3, w4 = st.columns(4)
+    w1.metric("No-Fund reference", "70% CQ + 30% L")
+    w2.metric("F10 scenario", "63% CQ + 27% L + 10% F")
+    w3.metric("F20 primary shadow", "56% CQ + 24% L + 20% F")
+    w4.metric("F30 scenario", "49% CQ + 21% L + 30% F")
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric(
+        "Composite rankable",
+        f"{summary.get('rankable', 0)}/{summary.get('total', 0)}",
+    )
+    c2.metric(
+        "Official→F20 Top-10",
+        f"{summary.get('official_f20_top10_overlap', 0)}/"
+        f"{summary.get('top_n', 0)}",
+    )
+    c3.metric(
+        "No-Fund→F20 Top-10",
+        f"{summary.get('nofund_f20_top10_overlap', 0)}/"
+        f"{summary.get('top_n', 0)}",
+    )
+
+    lead_shift = summary.get("median_abs_leadership_rank_impact")
+    c4.metric(
+        "Median |Leadership rank impact|",
+        "—" if lead_shift is None else f"{lead_shift:.1f}",
+    )
+
+    fund_shift = summary.get("median_abs_f20_fund_rank_impact")
+    c5.metric(
+        "Median |F20 Fundamental rank impact|",
+        "—" if fund_shift is None else f"{fund_shift:.1f}",
+    )
+
+    fund_score = summary.get("mean_abs_f20_fund_score_impact")
+    c6.metric(
+        "Mean |F20 Fundamental score impact|",
+        "—" if fund_score is None else f"{fund_score:.1f} pts",
+    )
+
+    review_count = summary.get("unranked_fundamental_review", 0)
+    if review_count:
+        st.warning(
+            f"{review_count} sampled candidate(s) are intentionally excluded "
+            "from full composite attribution because Fundamental Quality is "
+            "REVIEW, FAIL, or unavailable. No neutral/average score is substituted."
+        )
+
+    if summary.get("rankable", 0):
+        st.success(
+            "Attribution built successfully. Leadership and Fundamental effects "
+            "are now measured separately; official scanner order remains frozen."
+        )
+
+    st.markdown("**Scenario attribution summary — incremental Fundamental effect**")
+    scenario_summary = pd.DataFrame(summary.get("scenario_summary", []))
+    if not scenario_summary.empty:
+        st.dataframe(
+            scenario_summary,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    display_cols = [
+        "symbol",
+        "official_candidate_quality",
+        "leadership_score",
+        "fundamental_score",
+        "technical_leadership_reference",
+        "official_rank",
+        "no_fund_rank",
+        "leadership_rank_impact",
+        "shadow_f10",
+        "f10_rank",
+        "f10_fund_rank_impact",
+        "shadow_f20",
+        "shadow_f20_grade",
+        "f20_rank",
+        "f20_fund_rank_impact",
+        "shadow_f30",
+        "f30_rank",
+        "f30_fund_rank_impact",
+        "f20_fund_score_impact_pts",
+        "net_f20_rank_change",
+        "quality_profile",
+        "fundamental_confidence",
+        "batch_status",
+    ]
+
+    ranked_display = composite.copy()
+    ranked_display["_display_score"] = pd.to_numeric(
+        ranked_display.get("shadow_f20"),
+        errors="coerce",
+    )
+    ranked_display = ranked_display.sort_values(
+        ["_display_score", "official_candidate_quality"],
+        ascending=[False, False],
+        na_position="last",
+    ).drop(columns="_display_score")
+
+    st.dataframe(
+        ranked_display[
+            [c for c in display_cols if c in ranked_display.columns]
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.caption(
+        "Leadership rank impact = Official CQ rank → No-Fund rank. "
+        "F20 Fundamental rank impact = No-Fund rank → F20 rank. "
+        "Net F20 rank change = Official CQ rank → F20 rank."
+    )
+
+    rankable = composite[
+        pd.to_numeric(composite.get("shadow_f20"), errors="coerce").notna()
+    ].copy()
+
+    if not rankable.empty:
+        fund_movers = rankable.sort_values(
+            "f20_fund_rank_impact",
+            ascending=False,
+        )
+
+        left, right = st.columns(2)
+        with left:
+            st.markdown("**Largest FUNDAMENTAL promotions — F20 vs No-Fund**")
+            st.dataframe(
+                fund_movers.head(5)[
+                    [
+                        "symbol",
+                        "official_candidate_quality",
+                        "leadership_score",
+                        "fundamental_score",
+                        "no_fund_rank",
+                        "f20_rank",
+                        "f20_fund_rank_impact",
+                        "f20_fund_score_impact_pts",
+                        "quality_profile",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        with right:
+            st.markdown("**Largest FUNDAMENTAL demotions — F20 vs No-Fund**")
+            st.dataframe(
+                fund_movers.tail(5)
+                .sort_values("f20_fund_rank_impact")[
+                    [
+                        "symbol",
+                        "official_candidate_quality",
+                        "leadership_score",
+                        "fundamental_score",
+                        "no_fund_rank",
+                        "f20_rank",
+                        "f20_fund_rank_impact",
+                        "f20_fund_score_impact_pts",
+                        "quality_profile",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        leadership_movers = rankable.sort_values(
+            "leadership_rank_impact",
+            ascending=False,
+        )
+
+        st.markdown("**Leadership attribution — Official CQ vs No-Fund**")
+        left2, right2 = st.columns(2)
+
+        with left2:
+            st.markdown("**Largest Leadership promotions**")
+            st.dataframe(
+                leadership_movers.head(5)[
+                    [
+                        "symbol",
+                        "official_candidate_quality",
+                        "leadership_score",
+                        "official_rank",
+                        "no_fund_rank",
+                        "leadership_rank_impact",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        with right2:
+            st.markdown("**Largest Leadership demotions**")
+            st.dataframe(
+                leadership_movers.tail(5)
+                .sort_values("leadership_rank_impact")[
+                    [
+                        "symbol",
+                        "official_candidate_quality",
+                        "leadership_score",
+                        "official_rank",
+                        "no_fund_rank",
+                        "leadership_rank_impact",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    st.caption(
+        "Calibration discipline: V1.2.3a changes attribution only. F10/F20/F30 "
+        "weights are unchanged, and no permanent production weight is selected yet."
+    )
+
+
+def render_composite_robustness_calibration(batch_table):
+    """V1.2.3b weight-robustness and guardrail simulation; shadow only."""
+    if batch_table is None or batch_table.empty:
+        return
+
+    robust = build_composite_robustness_table(batch_table)
+    summary = summarize_composite_robustness(robust)
+
+    st.subheader("3E) Composite Weight Robustness & Guardrail Calibration")
+    st.info(
+        "V1.2.3b SHADOW MODE: this section does NOT change any official score or "
+        "ranking. It stress-tests Fundamental weight from 5% to 30% and simulates "
+        "F20 impact caps of ±4, ±6 and ±8 points. Guardrails are calibration "
+        "candidates only — none is enforced."
+    )
+
+    sample_total = summary.get("total", 0)
+    if sample_total < 40:
+        st.warning(
+            f"Current sample is {sample_total}. V1.2.3b live acceptance should use "
+            "a 50-name Fundamental Batch sample so robustness is not judged from "
+            "the earlier 25-name calibration alone."
+        )
+
+    st.caption(
+        "Weight formula preserves the frozen CQ:Leadership relationship: "
+        "Composite(w) = (1−w) × No-Fund Reference + w × Fundamental Quality. "
+        "Therefore F10/F20/F30 exactly match the accepted V1.2.3a formulas; "
+        "F05/F15/F25 are interpolation points only."
+    )
+
+    if summary.get("anchor_integrity_pass"):
+        st.success(
+            "FULL-PRECISION INTEGRITY PASS: F10/F20/F30 scores and ranks are "
+            "reused directly from the accepted V1.2.3a attribution layer. "
+            "F05/F15/F25 and guardrail simulations use unrounded internal "
+            "No-Fund / composite values for new ranking calculations."
+        )
+    else:
+        st.error(
+            "FULL-PRECISION INTEGRITY FAIL: a V1.2.3a anchor mismatch was detected. "
+            "Do not use this robustness result for calibration."
+        )
+
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1.metric(
+        "Rankable",
+        f"{summary.get('rankable', 0)}/{summary.get('total', 0)}",
+    )
+    m2.metric(
+        "Stable Top-10 F10→F30",
+        f"{summary.get('stable_top10_all_weights', 0)}/10",
+    )
+    m3.metric(
+        "Stable center Top-10 F15/F20/F25",
+        f"{summary.get('stable_top10_center_weights', 0)}/10",
+    )
+    med_range = summary.get("median_rank_range")
+    m4.metric(
+        "Median rank range",
+        "—" if med_range is None else f"{med_range:.1f}",
+    )
+    m5.metric(
+        "High-sensitivity names",
+        f"{summary.get('high_sensitivity_count', 0)}",
+        help="Rank range ≥5 places across the 5%–30% Fundamental weight grid.",
+    )
+    m6.metric(
+        "F20 ±6pt triggers",
+        f"{summary.get('cap6_trigger_count', 0)}",
+        help="Names whose raw F20 Fundamental score impact exceeds ±6 points.",
+    )
+
+    st.markdown("**Weight robustness grid**")
+    st.caption(
+        "F10/F20/F30 are frozen V1.2.3a anchor scenarios. F05/F15/F25 are "
+        "new full-precision interpolation scenarios. All rows compare against "
+        "the same accepted No-Fund reference."
+    )
+    weight_summary = pd.DataFrame(summary.get("weight_summary", []))
+    if not weight_summary.empty:
+        st.dataframe(
+            weight_summary,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.markdown("**Top-10 persistence and rank sensitivity**")
+    sensitivity_cols = [
+        "symbol",
+        "official_candidate_quality",
+        "leadership_score",
+        "fundamental_score",
+        "quality_profile",
+        "rank_f10",
+        "rank_f15",
+        "rank_f20",
+        "rank_f25",
+        "rank_f30",
+        "rank_range_f10_f30",
+        "top10_weight_count",
+        "center_top10_count",
+        "f20_fund_score_impact_pts",
+    ]
+    sensitivity = robust.copy()
+    sensitivity["_sort"] = pd.to_numeric(
+        sensitivity.get("rank_range_f10_f30"),
+        errors="coerce",
+    )
+    sensitivity = sensitivity.sort_values(
+        ["_sort", "official_candidate_quality"],
+        ascending=[False, False],
+        na_position="last",
+    ).drop(columns="_sort")
+    st.dataframe(
+        sensitivity[
+            [c for c in sensitivity_cols if c in sensitivity.columns]
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.caption(
+        "rank_range_f10_f30 = best-to-worst rank spread across F10, F15, F20, "
+        "F25 and F30. A large range means the stock is highly sensitive to the "
+        "chosen Fundamental weight. This is a calibration diagnostic, not a penalty."
+    )
+
+    st.markdown("**F20 guardrail simulation — impact cap comparison**")
+    guard_summary = pd.DataFrame(summary.get("guardrail_summary", []))
+    if not guard_summary.empty:
+        st.dataframe(
+            guard_summary,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.caption(
+        "A ±N-point guardrail caps only the incremental Fundamental contribution "
+        "around the No-Fund Reference. It does not alter Candidate Quality, "
+        "Leadership or Fundamental Quality themselves. Raw F20 remains the primary "
+        "uncapped calibration reference."
+    )
+
+    cap6 = robust[
+        pd.to_numeric(
+            robust.get("cap6_triggered"),
+            errors="coerce",
+        ).fillna(0).astype(bool)
+    ].copy()
+
+    if cap6.empty:
+        st.success(
+            "No rankable candidate exceeds the ±6-point F20 Fundamental-impact "
+            "threshold in this sample."
+        )
+    else:
+        st.markdown("**Candidates affected by the ±6pt guardrail simulation**")
+        cap6["_abs_raw"] = pd.to_numeric(
+            cap6["f20_fund_score_impact_pts"],
+            errors="coerce",
+        ).abs()
+        cap6 = cap6.sort_values("_abs_raw", ascending=False).drop(
+            columns="_abs_raw"
+        )
+        st.dataframe(
+            cap6[
+                [
+                    c
+                    for c in [
+                        "symbol",
+                        "official_candidate_quality",
+                        "leadership_score",
+                        "fundamental_score",
+                        "quality_profile",
+                        "technical_leadership_reference",
+                        "shadow_f20",
+                        "f20_fund_score_impact_pts",
+                        "f20_fund_score_impact_exact_pts",
+                        "guard_f20_cap6",
+                        "rank_f20",
+                        "guard_rank_cap6",
+                        "guard_rank_change_cap6_vs_raw",
+                        "cap6_direction",
+                    ]
+                    if c in cap6.columns
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    tech_weak = robust[
+        robust.get("quality_profile", pd.Series(dtype=str)).astype(str)
+        == "TECHNICAL-LED / WEAK FUNDAMENTALS"
+    ].copy()
+
+    if not tech_weak.empty:
+        st.markdown("**Technical-led / weak-fundamental preservation watch**")
+        st.dataframe(
+            tech_weak[
+                [
+                    c
+                    for c in [
+                        "symbol",
+                        "official_candidate_quality",
+                        "leadership_score",
+                        "fundamental_score",
+                        "technical_leadership_reference",
+                        "shadow_f20",
+                        "f20_fund_score_impact_pts",
+                        "rank_f20",
+                        "rank_range_f10_f30",
+                        "cap6_triggered",
+                        "guard_rank_cap6",
+                    ]
+                    if c in tech_weak.columns
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(
+            "This watchlist does NOT rescue or block these stocks. It tells us "
+            "whether a continuous Fundamental weight is excessively suppressing "
+            "technically/leadership-strong candidates — exactly the architecture "
+            "risk V1.2.3b is intended to measure."
+        )
+
+    st.caption(
+        "V1.2.3b historical calibration view retained for auditability. The completed "
+        "S&P 500 + Russell 2000 evidence is the basis for V1.2.3c selecting F15; "
+        "the ±4/±6/±8 cap rows remain simulations only and are not enforced."
+    )
+
+
+def render_selected_composite_architecture(batch_table):
+    """V1.2.3c selected F15 architecture; shadow-only first implementation."""
+    if batch_table is None or batch_table.empty:
+        return
+
+    selected = build_selected_composite_table(batch_table)
+    summary = summarize_selected_composite(selected)
+
+    st.subheader("3F) Composite Architecture Selection — F15 Explainable Shadow")
+    st.info(
+        "V1.2.3c ARCHITECTURE SELECTED / SHADOW IMPLEMENTATION: Composite F15 = "
+        "59.5% Candidate Quality + 25.5% Leadership + 15% Fundamental Quality. "
+        "F20 remains visible only as a sensitivity benchmark. This section does "
+        "NOT change official Candidate Quality, scanner ordering, buckets, Entry "
+        "Quality or trade decisions."
+    )
+
+    st.caption(
+        "Explainable guardrail = classification, not score manipulation. Incremental "
+        "F15 Fundamental impact is NORMAL when |impact| <4 pts, MATERIAL at 4–6 pts, "
+        "and HIGH IMPACT above 6 pts. No ±4/±6/±8 hard cap is applied."
+    )
+
+    integrity_ok = bool(summary.get("f15_formula_integrity_pass")) and bool(
+        summary.get("anchor_integrity_pass")
+    )
+    if integrity_ok:
+        st.success(
+            "V1.2.3c INTEGRITY PASS: F15 matches the exact 59.5/25.5/15 formula, "
+            "and accepted V1.2.3a F10/F20/F30 anchor integrity remains intact."
+        )
+    else:
+        st.error(
+            "V1.2.3c INTEGRITY FAIL: selected F15 formula or accepted anchor integrity "
+            "did not match. Do not use this section for acceptance."
+        )
+
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1.metric("F15 rankable", f"{summary.get('rankable', 0)}/{summary.get('total', 0)}")
+    m2.metric("Selected formula", "59.5 / 25.5 / 15")
+    m3.metric("F15↔F20 Top-10", f"{summary.get('f15_f20_top10_overlap', 0)}/10")
+    spearman = summary.get("f15_f20_spearman")
+    m4.metric("F15↔F20 Spearman", "—" if spearman is None else f"{spearman:.3f}")
+    m5.metric("HIGH IMPACT", f"{summary.get('high_impact', 0)}")
+    m6.metric("Hard score cap", "NONE")
+
+    i1, i2, i3 = st.columns(3)
+    i1.metric("NORMAL impact", f"{summary.get('normal', 0)}")
+    i2.metric("MATERIAL impact", f"{summary.get('material', 0)}")
+    med = summary.get("median_abs_f15_fund_impact")
+    i3.metric("Median |F15 F impact|", "—" if med is None else f"{med:.2f} pts")
+
+    st.markdown("**Selected F15 architecture table**")
+    display = selected.copy()
+    display["_rank_sort"] = pd.to_numeric(
+        display.get("composite_f15_rank"), errors="coerce"
+    )
+    display = display.sort_values(
+        ["_rank_sort", "official_candidate_quality"],
+        ascending=[True, False],
+        na_position="last",
+    ).drop(columns="_rank_sort")
+
+    display_cols = [
+        "symbol",
+        "official_candidate_quality",
+        "leadership_score",
+        "fundamental_score",
+        "composite_f15",
+        "composite_f15_grade",
+        "composite_f15_rank",
+        "f15_fund_impact_pts",
+        "fundamental_impact_label",
+        "shadow_f20_reference",
+        "shadow_f20_reference_rank",
+        "quality_profile",
+        "composite_status",
+    ]
+    st.dataframe(
+        display[[c for c in display_cols if c in display.columns]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    high = selected[
+        selected.get("fundamental_impact_state", pd.Series(dtype=str)).astype(str)
+        == "HIGH IMPACT"
+    ].copy()
+    if not high.empty:
+        st.markdown("**HIGH IMPACT explainability watch — no score rescue/cap**")
+        high["_abs"] = pd.to_numeric(
+            high.get("f15_fund_impact_exact_pts"), errors="coerce"
+        ).abs()
+        high = high.sort_values("_abs", ascending=False).drop(columns="_abs")
+        st.dataframe(
+            high[
+                [
+                    c
+                    for c in [
+                        "symbol",
+                        "official_candidate_quality",
+                        "leadership_score",
+                        "fundamental_score",
+                        "composite_f15",
+                        "f15_fund_impact_pts",
+                        "fundamental_impact_direction",
+                        "quality_profile",
+                    ]
+                    if c in high.columns
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.caption(
+        "Architecture interpretation: Candidate Quality remains technical truth; "
+        "Leadership remains relative-strength/resilience truth; Fundamental Quality "
+        "remains business-performance truth; Composite F15 is the combined shadow "
+        "assessment; Entry Quality remains the separate timing/actionability gate. "
+        "REVIEW/FAIL/unavailable fundamentals receive no full Composite score or rank."
+    )
+
+
+def render_contextual_volume_quality(scan):
+    """Render V1.3a completed-session contextual volume diagnostics, shadow only."""
+    st.subheader("3G) Contextual Volume Quality — Shadow Diagnostics")
+    st.info(
+        "V1.3a SHADOW MODE: price structure is identified independently first; "
+        "volume is then evaluated for context-specific confirmation or conflict. "
+        "Only completed consolidated SIP daily bars are used. This layer does NOT "
+        "change Candidate Quality, F15 Composite, Entry Quality, official ranking, "
+        "candidate buckets or trade decisions."
+    )
+
+    table = scan.get("volume_shadow")
+    summary = scan.get("volume_shadow_summary") or {}
+    official_ok = bool(scan.get("volume_shadow_official_integrity_pass", False))
+
+    if official_ok:
+        st.success(
+            "V1.3a OFFICIAL-LAYER INTEGRITY PASS: official scored values, dtypes and "
+            "row/column structure were unchanged while Contextual Volume diagnostics were built."
+        )
+    else:
+        st.error(
+            "V1.3a OFFICIAL-LAYER INTEGRITY FAIL: official scanner output changed "
+            "during shadow-volume construction. Do not use this run for acceptance."
+        )
+
+    shadow_error = scan.get("volume_shadow_error")
+    if shadow_error:
+        st.error(
+            "V1.3a shadow-volume construction failed safely. The frozen official scanner "
+            f"remains available and unchanged. Details: {shadow_error}"
+        )
+
+    if table is None or table.empty:
+        st.warning("No usable V1.3a contextual-volume diagnostics are available for this run.")
+        return
+
+    evaluated = int(summary.get("evaluated", len(table)))
+    high_conf = int(summary.get("high_confidence", 0))
+    breakout_n = int(summary.get("breakout_contexts", 0))
+    pullback_n = int(summary.get("pullback_base_contexts", 0))
+    confirming_n = int(summary.get("confirming", 0))
+    conflict_n = int(summary.get("conflict_watch", 0))
+    distribution_n = int(summary.get("distribution_watch", 0))
+    partial_n = int(summary.get("partial_excluded", 0))
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Candidates evaluated", f"{evaluated:,}")
+    m2.metric("HIGH Volume Data Confidence", f"{high_conf:,}/{evaluated:,}")
+    m3.metric("Breakout contexts", f"{breakout_n:,}")
+    m4.metric("Pullback / VCP / base", f"{pullback_n:,}")
+
+    m5, m6, m7, m8 = st.columns(4)
+    m5.metric("Volume CONFIRMING", f"{confirming_n:,}")
+    m6.metric("CONFLICT / WATCH", f"{conflict_n:,}")
+    m7.metric("Distribution watch", f"{distribution_n:,}")
+    m8.metric("Partial session excluded", f"{partial_n:,}")
+
+    not_ranked = int((table["contextual_volume_state"].astype(str) == "NOT RANKED").sum())
+    if partial_n:
+        st.caption(
+            f"{partial_n:,} candidate(s) had a same-day daily bar excluded because the "
+            "session had not reached the conservative 16:30 ET completion cutoff. "
+            "Formal volume diagnostics therefore compare full sessions with full sessions."
+        )
+    if not_ranked:
+        st.warning(
+            f"{not_ranked:,} candidate(s) are NOT RANKED for Contextual Volume because "
+            "Volume Data Confidence is LOW. No neutral/average volume conclusion is substituted."
+        )
+
+    st.caption(
+        "Frozen V1.2.3c setup/Entry logic still retains its legacy vol_ratio behavior. "
+        "V1.3a does not rewrite that official logic; this shadow section deliberately "
+        "uses completed-session evidence so any disagreement can be measured before promotion."
+    )
+
+    display_cols = [
+        "symbol",
+        "official_bucket",
+        "official_setup",
+        "official_candidate_quality",
+        "official_entry_quality",
+        "price_context",
+        "eval_session",
+        "rvol_20",
+        "vol5_vs_prior20",
+        "vol10_vs_prior20",
+        "up_down_vol_ratio_10",
+        "up_volume_share_10_pct",
+        "accumulation_days_10",
+        "distribution_days_10",
+        "volume_trend_5",
+        "volume_trend_10",
+        "contextual_volume_state",
+        "volume_data_confidence",
+        "volume_notes",
+    ]
+
+    def _display_frame(source):
+        out = source[[c for c in display_cols if c in source.columns]].copy()
+        for col in [
+            "official_candidate_quality",
+            "official_entry_quality",
+            "rvol_20",
+            "vol5_vs_prior20",
+            "vol10_vs_prior20",
+            "up_down_vol_ratio_10",
+            "up_volume_share_10_pct",
+        ]:
+            if col in out.columns:
+                out[col] = pd.to_numeric(out[col], errors="coerce").round(2)
+        return out
+
+    confirming = table[table["contextual_volume_state"].astype(str) == "CONFIRMING"].copy()
+    if not confirming.empty:
+        confirming["_q"] = pd.to_numeric(
+            confirming["official_candidate_quality"], errors="coerce"
+        )
+        confirming = confirming.sort_values("_q", ascending=False).drop(columns="_q")
+        st.markdown("**Volume-confirming setups — shadow evidence**")
+        st.dataframe(
+            _display_frame(confirming).head(40),
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.caption("No candidate currently has a CONFIRMING contextual-volume label.")
+
+    conflict = table[table["contextual_volume_state"].astype(str) == "CONFLICT / WATCH"].copy()
+    if not conflict.empty:
+        conflict["_q"] = pd.to_numeric(
+            conflict["official_candidate_quality"], errors="coerce"
+        )
+        conflict = conflict.sort_values("_q", ascending=False).drop(columns="_q")
+        st.markdown("**Volume-conflict watch — good price structure is not rescued**")
+        st.dataframe(
+            _display_frame(conflict).head(40),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with st.expander("V1.3a full contextual-volume diagnostic audit", expanded=False):
+        st.dataframe(
+            _display_frame(table),
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(
+            "RVOL uses the evaluated completed session versus the prior 20 completed "
+            "sessions. 5D and 10D participation ratios use non-overlapping prior-20 "
+            "baselines. Accumulation/distribution counts are diagnostics, not scores. "
+            "V1.3a intentionally has no 0–100 Volume Quality score yet."
+        )
+
+
+
+def render_entry_location_diagnostics(scan):
+    """Render V1.3b continuous Entry Location / Anti-Chase diagnostics, shadow only."""
+    st.subheader("3H) Entry Location & Anti-Chase — Shadow Diagnostics")
+    st.info(
+        "V1.3b SHADOW MODE: extension is measured continuously against the EXISTING "
+        "frozen hard NO CHASE ceilings. The hard ceilings themselves are not relaxed, "
+        "and this section does NOT change official Entry Quality, Candidate Quality, "
+        "F15 Composite, ranking, buckets, event gates or trade decisions."
+    )
+
+    table = scan.get("entry_location_shadow")
+    summary = scan.get("entry_location_shadow_summary") or {}
+    official_ok = bool(scan.get("entry_location_official_integrity_pass", False))
+    parity_ok = bool(scan.get("entry_location_hard_ceiling_parity_pass", False))
+
+    if official_ok:
+        st.success(
+            "V1.3b OFFICIAL-LAYER INTEGRITY PASS: official scored values, dtypes and "
+            "row/column structure were unchanged while Entry Location diagnostics were built."
+        )
+    else:
+        st.error(
+            "V1.3b OFFICIAL-LAYER INTEGRITY FAIL: official scanner output changed during "
+            "shadow Entry Location construction. Do not use this run for acceptance."
+        )
+
+    if parity_ok:
+        st.success(
+            "V1.3b HARD NO CHASE PARITY PASS: the independent shadow recomputation agrees "
+            "with the frozen official chase gate for every rankable candidate."
+        )
+    else:
+        st.error(
+            "V1.3b HARD NO CHASE PARITY FAIL: at least one independently recomputed hard "
+            "ceiling disagrees with the frozen official chase gate. Investigate before acceptance."
+        )
+
+    shadow_error = scan.get("entry_location_shadow_error")
+    if shadow_error:
+        st.error(
+            "V1.3b Entry Location construction failed safely. The frozen official scanner "
+            f"remains available and unchanged. Details: {shadow_error}"
+        )
+
+    if table is None or table.empty:
+        st.warning("No usable V1.3b Entry Location diagnostics are available for this run.")
+        return
+
+    evaluated = int(summary.get("evaluated", len(table)))
+    ranked = int(summary.get("ranked", 0))
+    prime = int(summary.get("prime_controlled", 0))
+    acceptable = int(summary.get("acceptable", 0))
+    stretched = int(summary.get("stretched", 0))
+    very_late = int(summary.get("very_late", 0))
+    repair = int(summary.get("repair_below_ema20", 0))
+    hard = int(summary.get("hard_no_chase", 0))
+    near_ceiling = int(summary.get("near_ceiling_watch", 0))
+    late_actionable = int(summary.get("late_official_actionable", 0))
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Candidates evaluated", f"{evaluated:,}")
+    m2.metric("Rankable location data", f"{ranked:,}/{evaluated:,}")
+    m3.metric("PRIME / CONTROLLED", f"{prime:,}")
+    m4.metric("ACCEPTABLE", f"{acceptable:,}")
+
+    m5, m6, m7, m8 = st.columns(4)
+    m5.metric("STRETCHED", f"{stretched:,}")
+    m6.metric("VERY LATE / ceiling", f"{very_late:,}")
+    m7.metric("REPAIR / below EMA20", f"{repair:,}")
+    m8.metric("Hard NO CHASE", f"{hard:,}")
+
+    st.caption(
+        f"Near-ceiling watch (75%–<100% of a frozen hard ceiling): {near_ceiling:,}. "
+        f"Official ACTIONABLE/TECH ACTIONABLE names already STRETCHED or VERY LATE in shadow: "
+        f"{late_actionable:,}. These are research diagnostics only."
+    )
+    st.caption(
+        "Frozen hard NO CHASE semantics are preserved exactly: >5.0% above EMA8, "
+        ">8.0% above EMA20, or >2.0 ATR above EMA20. Exactly at a ceiling is not a "
+        "hard breach under the existing strict '>' rule, but V1.3b can label it VERY LATE."
+    )
+    st.caption(
+        "Continuous pressure = positive extension divided by its frozen hard ceiling. "
+        "The maximum of EMA8 / EMA20 / ATR pressure is shown transparently; V1.3b does "
+        "not create a production Entry Location score or change an official decision."
+    )
+
+    display_cols = [
+        "symbol",
+        "official_bucket",
+        "official_setup",
+        "official_candidate_quality",
+        "official_entry_quality",
+        "official_decision",
+        "close",
+        "ema8",
+        "ema20",
+        "ext_ema8_pct",
+        "ext_ema20_pct",
+        "ext_atr",
+        "ema8_pressure_pct",
+        "ema20_pressure_pct",
+        "atr_pressure_pct",
+        "max_chase_pressure_pct",
+        "hard_ceiling_headroom_pct",
+        "dominant_extension_axis",
+        "entry_location_state",
+        "hard_no_chase",
+        "hard_no_chase_reasons",
+        "official_hard_no_chase",
+        "hard_no_chase_parity",
+        "location_data_confidence",
+        "location_notes",
+    ]
+
+    def _display_location_frame(source):
+        out = source[[c for c in display_cols if c in source.columns]].copy()
+        for col in [
+            "official_candidate_quality",
+            "official_entry_quality",
+            "close",
+            "ema8",
+            "ema20",
+            "ext_ema8_pct",
+            "ext_ema20_pct",
+            "ext_atr",
+            "ema8_pressure_pct",
+            "ema20_pressure_pct",
+            "atr_pressure_pct",
+            "max_chase_pressure_pct",
+            "hard_ceiling_headroom_pct",
+        ]:
+            if col in out.columns:
+                out[col] = pd.to_numeric(out[col], errors="coerce").round(2)
+        return out
+
+    late_watch = table[
+        table["entry_location_state"].astype(str).isin(
+            ["STRETCHED", "VERY LATE / AT CEILING"]
+        )
+        & ~table["hard_no_chase"].fillna(False).astype(bool)
+    ].copy()
+    if not late_watch.empty:
+        late_watch["_pressure"] = pd.to_numeric(
+            late_watch["max_chase_pressure_pct"], errors="coerce"
+        )
+        late_watch = late_watch.sort_values("_pressure", ascending=False).drop(columns="_pressure")
+        st.markdown("**Late-entry watch — before the frozen binary NO CHASE gate**")
+        st.dataframe(
+            _display_location_frame(late_watch).head(40),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    hard_table = table[table["hard_no_chase"].fillna(False).astype(bool)].copy()
+    if not hard_table.empty:
+        hard_table["_pressure"] = pd.to_numeric(
+            hard_table["max_chase_pressure_pct"], errors="coerce"
+        )
+        hard_table = hard_table.sort_values("_pressure", ascending=False).drop(columns="_pressure")
+        st.markdown("**Hard NO CHASE — independently recomputed frozen ceilings**")
+        st.dataframe(
+            _display_location_frame(hard_table).head(40),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    full_export = _display_location_frame(table)
+    st.download_button(
+        "Download FULL V1.3b Entry Location diagnostic CSV",
+        data=full_export.to_csv(index=False).encode("utf-8"),
+        file_name="v13b_entry_location_full_diagnostic.csv",
+        mime="text/csv",
+        key="download_v13b_entry_location_full",
+    )
+
+    with st.expander("V1.3b full Entry Location / Anti-Chase diagnostic audit", expanded=False):
+        st.dataframe(
+            full_export,
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(
+            "Pressure bands are provisional research labels normalized to the existing frozen "
+            "hard ceilings: ≤40% PRIME/CONTROLLED, ≤65% ACCEPTABLE, ≤85% STRETCHED, "
+            ">85% VERY LATE until a hard ceiling is actually exceeded. Price below the EMA20 "
+            "repair band is classified separately so low positive-extension pressure is not "
+            "mistaken for a good entry. Threshold expectancy remains unproven."
+        )
+
+
+
+def render_entry_zone_diagnostics(scan):
+    """Render V1.3c Trigger / Entry-Zone architecture diagnostics, shadow only."""
+    st.subheader("3I) Trigger & Entry Zone — Shadow Diagnostics")
+    st.info(
+        "V1.3c SHADOW MODE: current price is no longer treated as the only practical entry reference. "
+        "This section separates prior-structure trigger, confirmation condition, planned entry zone and "
+        "maximum acceptable fill. It does NOT change official Entry Quality, legacy entry_px, stop/T1/T2, "
+        "Candidate Quality, F15 Composite, ranking, buckets, event gates or trade decisions."
+    )
+
+    table = scan.get("entry_zone_shadow")
+    summary = scan.get("entry_zone_shadow_summary") or {}
+    official_ok = bool(scan.get("entry_zone_official_integrity_pass", False))
+    structure_ok = bool(scan.get("entry_zone_structure_parity_pass", False))
+
+    if official_ok:
+        st.success(
+            "V1.3c OFFICIAL-LAYER INTEGRITY PASS: official scored values, dtypes and row/column "
+            "structure were unchanged while Trigger / Entry-Zone diagnostics were built."
+        )
+    else:
+        st.error(
+            "V1.3c OFFICIAL-LAYER INTEGRITY FAIL: official scanner output changed during shadow "
+            "Trigger / Entry-Zone construction. Do not use this run for acceptance."
+        )
+
+    if structure_ok:
+        st.success(
+            "V1.3c PRIOR-20 STRUCTURE PARITY PASS: independently reconstructed prior-20-session "
+            "highs agree with the frozen official high20_prev reference wherever both are available."
+        )
+    else:
+        st.error(
+            "V1.3c PRIOR-20 STRUCTURE PARITY FAIL: at least one reconstructed prior-20-session "
+            "high disagrees with the frozen high20_prev reference. Investigate before acceptance."
+        )
+
+    shadow_error = scan.get("entry_zone_shadow_error")
+    if shadow_error:
+        st.error(
+            "V1.3c Trigger / Entry-Zone construction failed safely. The frozen official scanner "
+            f"remains available and unchanged. Details: {shadow_error}"
+        )
+
+    if table is None or table.empty:
+        st.warning("No usable V1.3c Trigger / Entry-Zone diagnostics are available for this run.")
+        return
+
+    evaluated = int(summary.get("evaluated", len(table)))
+    high_conf = int(summary.get("high_confidence", 0))
+    structured = int(summary.get("structured_plans", 0))
+    waiting = int(summary.get("waiting_for_trigger", 0))
+    in_zone = int(summary.get("in_entry_zone", 0))
+    late = int(summary.get("above_zone_late", 0))
+    missed = int(summary.get("missed_no_chase", 0))
+    blocked = int(summary.get("trigger_blocked", 0))
+    no_plan = int(summary.get("no_structured_plan", 0))
+    not_ranked = int(summary.get("not_ranked", 0))
+    entry_ref_matches = int(summary.get("official_entry_ref_current_matches", 0))
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Candidates evaluated", f"{evaluated:,}")
+    m2.metric("HIGH Plan Data Confidence", f"{high_conf:,}/{evaluated:,}")
+    m3.metric("Structured trigger plans", f"{structured:,}")
+    m4.metric("Waiting for trigger", f"{waiting:,}")
+
+    m5, m6, m7, m8 = st.columns(4)
+    m5.metric("Triggered • in entry zone", f"{in_zone:,}")
+    m6.metric("Triggered • above zone / late", f"{late:,}")
+    m7.metric("Missed / NO CHASE", f"{missed:,}")
+    m8.metric("Trigger blocked by hard ceiling", f"{blocked:,}")
+
+    st.caption(
+        f"No structured plan: {no_plan:,} • NOT RANKED: {not_ranked:,} • "
+        f"Frozen official entry_px still matches the current close for {entry_ref_matches:,}/{evaluated:,} rows. "
+        "V1.3c measures the alternative planning architecture without rewriting that frozen field."
+    )
+    st.caption(
+        "Reference mechanics are deliberately transparent and provisional: structural triggers use prior daily-bar highs; "
+        "the preferred entry zone extends 0.25 ATR above trigger; the raw maximum fill extends 0.50 ATR above trigger; "
+        "maximum fill is then capped by the most restrictive existing frozen EMA8 / EMA20 / ATR hard NO CHASE ceiling."
+    )
+    st.caption(
+        "These zone-width/fill parameters are research references, not proven production thresholds. "
+        "If a structural trigger itself lies beyond a frozen hard ceiling, V1.3c BLOCKS the plan instead of moving the ceiling."
+    )
+
+    display_cols = [
+        "symbol",
+        "official_bucket",
+        "official_setup",
+        "official_candidate_quality",
+        "official_entry_quality",
+        "official_entry_px",
+        "current_price",
+        "trigger_type",
+        "trigger_price",
+        "confirmation_condition",
+        "entry_zone_low",
+        "entry_zone_high",
+        "max_acceptable_fill",
+        "trigger_distance_pct",
+        "max_fill_headroom_pct",
+        "frozen_hard_ceiling_px",
+        "trigger_to_hard_ceiling_atr",
+        "plan_state",
+        "trigger_beyond_hard_ceiling",
+        "high20_structure_parity",
+        "plan_data_confidence",
+        "plan_notes",
+    ]
+
+    def _display_entry_zone_frame(source):
+        out = source[[c for c in display_cols if c in source.columns]].copy()
+        for col in [
+            "official_candidate_quality",
+            "official_entry_quality",
+            "official_entry_px",
+            "current_price",
+            "trigger_price",
+            "entry_zone_low",
+            "entry_zone_high",
+            "max_acceptable_fill",
+            "trigger_distance_pct",
+            "max_fill_headroom_pct",
+            "frozen_hard_ceiling_px",
+            "trigger_to_hard_ceiling_atr",
+        ]:
+            if col in out.columns:
+                out[col] = pd.to_numeric(out[col], errors="coerce").round(2)
+        return out
+
+    waiting_table = table[table["plan_state"].astype(str) == "WAITING FOR TRIGGER"].copy()
+    if not waiting_table.empty:
+        waiting_table["_distance"] = pd.to_numeric(
+            waiting_table["trigger_distance_pct"], errors="coerce"
+        )
+        waiting_table = waiting_table.sort_values("_distance", ascending=True).drop(columns="_distance")
+        st.markdown("**Conditional plans — waiting for structural trigger**")
+        st.dataframe(
+            _display_entry_zone_frame(waiting_table).head(40),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    active_states = [
+        "TRIGGERED — IN ENTRY ZONE",
+        "TRIGGERED — ABOVE ZONE / LATE",
+        "MISSED / NO CHASE — ABOVE MAX FILL",
+        "BLOCKED — TRIGGER BEYOND HARD CEILING",
+    ]
+    active = table[table["plan_state"].astype(str).isin(active_states)].copy()
+    if not active.empty:
+        st.markdown("**Triggered / late / blocked plans — shadow execution map**")
+        st.dataframe(
+            _display_entry_zone_frame(active).head(40),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    full_export = _display_entry_zone_frame(table)
+    st.download_button(
+        "Download FULL V1.3c Trigger / Entry-Zone diagnostic CSV",
+        data=full_export.to_csv(index=False).encode("utf-8"),
+        file_name="v13c_trigger_entry_zone_full_diagnostic.csv",
+        mime="text/csv",
+        key="download_v13c_trigger_entry_zone_full",
+    )
+
+    with st.expander("V1.3c full Trigger / Entry-Zone diagnostic audit", expanded=False):
+        st.dataframe(full_export, use_container_width=True, hide_index=True)
+        st.caption(
+            "Breakout plans use the prior-20-session high; EMA20 pullbacks use an EMA20/prior-session-high reclaim; "
+            "VCP/tight-base plans use the prior-10-session structure high; MA20 repair uses a reclaim plan. "
+            "TRENDING / NO CLEAN SETUP and BROKEN / BELOW MA50 receive NO STRUCTURED PLAN rather than an invented trigger."
+        )
+
+
+def _symbol_key(symbol):
+    """Canonical comparison key for external index/ETF vs Alpaca tickers."""
+    return "".join(ch for ch in str(symbol).upper().strip() if ch.isalnum())
+
+
+def _money_m(value):
+    if value is None or pd.isna(value):
+        return "—"
+    return f"${float(value) / 1_000_000:,.1f}M"
+
+
+def _money_m2(value):
+    """Two-decimal $M formatter for audit-boundary precision."""
+    if value is None or pd.isna(value):
+        return "—"
+    return f"${float(value) / 1_000_000:,.2f}M"
+
+
+def _pct(numerator, denominator):
+    if not denominator:
+        return 0.0
+    return 100.0 * float(numerator) / float(denominator)
+
+
+def liquid_universe(client, cfg, selected_symbols=None):
+    """Apply Alpaca tradability + completed-session consolidated SIP gates.
+
+    Returns the deep-scan selection plus a complete audit dictionary. The audit
+    keeps the *true* liquidity-pass count separate from the deep-scan cap.
+    """
+    selected_keys = (
+        {_symbol_key(s) for s in selected_symbols}
+        if selected_symbols
+        else None
+    )
+
+    valid = []
+    for asset in load_assets(client):
+        if not (
+            asset.get("tradable")
+            and asset.get("status") == "active"
+            and asset.get("exchange") in {"NASDAQ", "NYSE", "ARCA", "AMEX"}
+        ):
+            continue
+
+        symbol = asset.get("symbol", "")
+        if not symbol or len(symbol) > 10 or "/" in symbol:
+            continue
+
+        if selected_keys is not None and _symbol_key(symbol) not in selected_keys:
+            continue
+
+        valid.append(symbol)
+
+    # Audit named-universe membership explicitly. No silent disappearance:
+    # list source-universe symbols that did not match an active/tradable Alpaca
+    # U.S. equity after the same canonical-symbol normalization used above.
+    if selected_symbols:
+        matched_keys = {_symbol_key(s) for s in valid}
+        unmatched_symbols = [
+            s for s in selected_symbols if _symbol_key(s) not in matched_keys
+        ]
+    else:
+        unmatched_symbols = []
+
+    prev_bars = load_prev_daily_bars(
+        client,
+        tuple(valid),
+        cfg.snapshot_batch_size,
+    )
+
+    observations = []
+    for symbol in valid:
+        bar = prev_bars.get(symbol) or {}
+        px = bar.get("c")
+        vol = bar.get("v")
+        bar_ts = bar.get("t")
+
+        if px is None or vol is None:
+            continue
+
+        try:
+            px = float(px)
+            vol = float(vol)
+        except Exception:
+            continue
+
+        if px <= 0 or vol < 0:
+            continue
+
+        dollar_volume = px * vol
+        passed_price = px >= cfg.min_price
+        passed_liquidity = passed_price and dollar_volume >= cfg.min_prev_dollar_volume
+
+        observations.append(
+            {
+                "symbol": symbol,
+                "bar_timestamp": bar_ts,
+                "snapshot_price": px,
+                "previous_volume": vol,
+                "prev_dollar_volume": dollar_volume,
+                "passed_price": passed_price,
+                "passed_liquidity": passed_liquidity,
+            }
+        )
+
+    obs = pd.DataFrame(observations)
+    if obs.empty:
+        passed = pd.DataFrame(
+            columns=["symbol", "snapshot_price", "prev_dollar_volume"]
+        )
+        price_pass_count = 0
+        liquidity_pass_count = 0
+    else:
+        price_pass_count = int(obs["passed_price"].sum())
+        full_pass = obs[obs["passed_liquidity"]].copy()
+        liquidity_pass_count = int(len(full_pass))
+        passed = (
+            full_pass.sort_values("prev_dollar_volume", ascending=False)
+            .head(cfg.max_deep_scan_symbols)
+            [["symbol", "snapshot_price", "prev_dollar_volume"]]
+            .reset_index(drop=True)
+        )
+
+    diag = liquidity_summary(obs, cfg.min_prev_dollar_volume)
+    audit = {
+        "matched_count": len(valid),
+        "unmatched_symbols": unmatched_symbols,
+        "sip_bar_count": len(prev_bars),
+        "usable_sip_count": len(obs),
+        "missing_sip_count": max(len(valid) - len(prev_bars), 0),
+        "unusable_sip_count": max(len(prev_bars) - len(obs), 0),
+        "price_pass_count": price_pass_count,
+        "liquidity_pass_count": liquidity_pass_count,
+        "deep_scan_count": len(passed),
+        "deep_scan_capped": liquidity_pass_count > cfg.max_deep_scan_symbols,
+        "q25": diag["q25"],
+        "median": diag["median"],
+        "q75": diag["q75"],
+        "cutoff_sample": diag["cutoff_sample"],
+    }
+    return passed, audit
+
+
+
+def _fund_pct(value):
+    if value is None or pd.isna(value):
+        return "—"
+    return f"{100.0 * float(value):+.1f}%"
+
+
+def _fund_pp(value):
+    if value is None or pd.isna(value):
+        return "—"
+    return f"{100.0 * float(value):+.1f}pp"
+
+
+def render_fundamental_quality(symbol, *, expanded=True, key_prefix="fund"):
+    """Render V1.2.2.2a fundamentals in read-only SHADOW MODE."""
+    with st.spinner(f"Loading official SEC fundamentals for {symbol}..."):
+        fund = load_fundamental_snapshot(symbol)
+
+    with st.expander(
+        "V1.2.2.2a Fundamental Growth & Earnings Quality — Concept Integrity View",
+        expanded=expanded,
+    ):
+        st.caption(
+            "SHADOW MODE: official SEC financial-performance diagnostics are "
+            "displayed for validation only. They do NOT yet change Persistent "
+            "Quality, Candidate Quality, Leadership, Entry Quality, buckets, "
+            "or trade decisions. Earnings/event DATE reliability remains a "
+            "separate roadmap layer."
+        )
+
+        f1, f2, f3, f4 = st.columns(4)
+        f1.metric(
+            "Fundamental Quality (shadow)",
+            (
+                f"{fund['fundamental_score']:.1f}/100"
+                if pd.notna(fund.get("fundamental_score"))
+                else "N/A"
+            ),
+        )
+        f2.metric("Fundamental grade", fund.get("fundamental_grade", "N/A"))
+        f3.metric(
+            "Fundamental Data Confidence",
+            fund.get("fundamental_confidence", "UNKNOWN"),
+        )
+        f4.metric(
+            "Metric coverage",
+            f"{fund.get('available_weight_pct', 0):.0f}%",
+        )
+
+        st.markdown("#### SEC Fair Access & Connectivity")
+        a1, a2, a3 = st.columns(3)
+        a1.metric(
+            "Fair Access declaration",
+            fund.get("fair_access_status", "UNKNOWN"),
+        )
+        a2.metric(
+            "Ticker → CIK",
+            fund.get("identity_access_status", "UNKNOWN"),
+        )
+        a3.metric(
+            "CompanyFacts",
+            fund.get("companyfacts_access_status", "UNKNOWN"),
+        )
+
+        b1, b2, b3 = st.columns(3)
+        b1.metric(
+            "Transport diagnosis",
+            fund.get("companyfacts_transport_diagnosis", "UNKNOWN"),
+        )
+        b2.metric(
+            "Identity source",
+            fund.get("identity_source") or "—",
+        )
+        b3.metric(
+            "Declared contact",
+            "CONFIGURED" if fund.get("fair_access_contact") else "—",
+        )
+
+        identity_authority = fund.get("identity_authority")
+        if identity_authority:
+            if "MIRROR" in str(identity_authority).upper():
+                st.info(
+                    "Ticker → CIK was resolved through a version-pinned "
+                    "SEC-derived transport mirror because the deployment path "
+                    "to www.sec.gov is blocked. Revenue, earnings, filing dates "
+                    "and all financial facts are still requested ONLY from "
+                    "official data.sec.gov CompanyFacts."
+                )
+            else:
+                st.caption(f"Identity authority: {identity_authority}")
+
+        if fund.get("fair_access_status") == "CONFIG REQUIRED":
+            st.warning(
+                "SEC CompanyFacts has NOT been requested yet. A declared "
+                "Fair Access contact email is required. Configure the "
+                "Streamlit secret SEC_CONTACT_EMAIL, then inspect the ticker "
+                "again. N/A values are not financial conclusions while this "
+                "status is shown."
+            )
+        elif fund.get("sec_access_status") != "PASS":
+            st.error(
+                "SEC CompanyFacts access did not complete. This is a "
+                "connectivity/transport result, NOT evidence that the company "
+                "lacks fundamentals. Diagnosis: "
+                + str(
+                    fund.get("companyfacts_transport_diagnosis")
+                    or "UNKNOWN"
+                )
+            )
+            if fund.get("access_detail"):
+                st.caption("Technical detail: " + str(fund["access_detail"]))
+        elif fund.get("identity_diagnostics"):
+            st.caption(
+                "SEC identity fallback diagnostics: "
+                + str(fund.get("identity_diagnostics"))
+            )
+
+
+        st.markdown("#### SEC Concept Continuity & Latest-Period Integrity")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric(
+            "Revenue quarter concept",
+            fund.get("revenue_quarter_concept") or "REVIEW REQUIRED",
+        )
+        c2.metric(
+            "Revenue FY concept",
+            fund.get("revenue_annual_concept") or "REVIEW REQUIRED",
+        )
+        c3.metric(
+            "Concept continuity",
+            fund.get("revenue_concept_continuity") or "UNKNOWN",
+        )
+        c4.metric(
+            "Revenue latest-period",
+            fund.get("revenue_quarter_latest_period_status") or "UNKNOWN",
+        )
+
+        d1, d2, d3, d4 = st.columns(4)
+        d1.metric(
+            "Revenue Q period",
+            str(fund.get("revenue_q_end") or "—"),
+        )
+        d2.metric(
+            "Issuer latest Q reference",
+            str(fund.get("company_quarter_reference_end") or "—"),
+        )
+        qlag = fund.get("revenue_quarter_company_lag_days")
+        d3.metric(
+            "Revenue Q lag",
+            f"{int(qlag)} days" if qlag is not None else "—",
+        )
+        d4.metric(
+            "Revenue FY latest-period",
+            fund.get("revenue_annual_latest_period_status") or "UNKNOWN",
+        )
+
+        concept_notes = fund.get("revenue_concept_notes") or []
+        if fund.get("revenue_quarter_latest_period_status") == "REVIEW":
+            st.warning(
+                "Current-quarter revenue is blocked until a current approved "
+                "SEC concept is established. No older quarter may substitute. "
+                + (" | ".join(concept_notes) if concept_notes else "")
+            )
+        elif fund.get("revenue_concept_continuity") == "SPLIT CURRENT SOURCES":
+            st.info(
+                "SEC concept transition detected and resolved: quarter and FY "
+                "use different approved current concepts. Exact provenance is "
+                "shown in the Metric Integrity Audit below."
+            )
+        elif fund.get("revenue_quarter_latest_period_status") == "PASS":
+            st.success(
+                "Revenue latest-period gate PASS — the displayed current-quarter "
+                "metric comes from the issuer's current reporting horizon."
+            )
+
+        st.markdown("#### Revenue growth")
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric(
+            "Latest quarter YoY",
+            (
+                _fund_pct(fund.get("revenue_q_yoy"))
+                if pd.notna(fund.get("revenue_q_yoy"))
+                else "N/A — CONCEPT REVIEW REQUIRED"
+                if fund.get("revenue_quarter_latest_period_status") == "REVIEW"
+                else "N/A"
+            ),
+        )
+        r2.metric(
+            "Previous quarter YoY",
+            _fund_pct(fund.get("revenue_q_prior_yoy")),
+        )
+        r3.metric(
+            "Growth change",
+            _fund_pp(fund.get("revenue_q_change")),
+        )
+        rev_valid = int(fund.get("revenue_valid_count", 0) or 0)
+        rev_pos = int(fund.get("revenue_positive_count", 0) or 0)
+        r4.metric(
+            "Recent positive YoY reads",
+            f"{rev_pos}/{rev_valid}" if rev_valid else "—",
+        )
+
+        if (
+            pd.notna(fund.get("revenue_q_prior_yoy"))
+            and pd.notna(fund.get("revenue_q_yoy"))
+            and pd.notna(fund.get("revenue_q_change"))
+        ):
+            rev_state = (
+                "ACCELERATING"
+                if fund["revenue_q_change"] >= 0.05
+                else "DECELERATING"
+                if fund["revenue_q_change"] <= -0.05
+                else "STABLE"
+            )
+            st.caption(
+                "Revenue momentum: "
+                f"{_fund_pct(fund['revenue_q_prior_yoy'])} → "
+                f"{_fund_pct(fund['revenue_q_yoy'])} "
+                f"({_fund_pp(fund['revenue_q_change'])}) — {rev_state}."
+            )
+
+        st.markdown("#### Earnings growth")
+        e1, e2, e3, e4 = st.columns(4)
+        earnings_metric = fund.get("earnings_metric", "Earnings")
+        latest_earnings = (
+            _fund_pct(fund.get("earnings_q_yoy"))
+            if pd.notna(fund.get("earnings_q_yoy"))
+            else fund.get("earnings_q_state", "N/A")
+        )
+        e1.metric(f"Latest quarter YoY • {earnings_metric}", latest_earnings)
+        e2.metric(
+            "Previous quarter YoY",
+            _fund_pct(fund.get("earnings_q_prior_yoy")),
+        )
+        e3.metric(
+            "Growth change",
+            _fund_pp(fund.get("earnings_q_change")),
+        )
+        earn_valid = int(fund.get("earnings_valid_count", 0) or 0)
+        earn_pos = int(fund.get("earnings_positive_count", 0) or 0)
+        e4.metric(
+            "Recent positive YoY reads",
+            f"{earn_pos}/{earn_valid}" if earn_valid else "—",
+        )
+
+        if (
+            pd.notna(fund.get("earnings_q_prior_yoy"))
+            and pd.notna(fund.get("earnings_q_yoy"))
+            and pd.notna(fund.get("earnings_q_change"))
+        ):
+            earn_state = (
+                "ACCELERATING"
+                if fund["earnings_q_change"] >= 0.05
+                else "DECELERATING"
+                if fund["earnings_q_change"] <= -0.05
+                else "STABLE"
+            )
+            st.caption(
+                f"{earnings_metric} momentum: "
+                f"{_fund_pct(fund['earnings_q_prior_yoy'])} → "
+                f"{_fund_pct(fund['earnings_q_yoy'])} "
+                f"({_fund_pp(fund['earnings_q_change'])}) — {earn_state}."
+            )
+
+        st.markdown("#### Longer-term confirmation")
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric(
+            "Latest FY revenue YoY",
+            (
+                _fund_pct(fund.get("revenue_annual_yoy"))
+                if pd.notna(fund.get("revenue_annual_yoy"))
+                else "N/A — CONCEPT REVIEW REQUIRED"
+                if fund.get("revenue_annual_latest_period_status") == "REVIEW"
+                else "N/A"
+            ),
+        )
+        annual_earn = (
+            _fund_pct(fund.get("earnings_annual_yoy"))
+            if pd.notna(fund.get("earnings_annual_yoy"))
+            else fund.get("earnings_annual_state", "N/A")
+        )
+        a2.metric(f"Latest FY • {earnings_metric}", annual_earn)
+        a3.metric(
+            "Latest filing used",
+            (
+                str(fund.get("latest_filed"))
+                if fund.get("latest_filed")
+                else "—"
+            ),
+        )
+        a4.metric(
+            "SEC issuer / CIK",
+            (
+                f"{fund.get('ticker')} / {int(fund['cik']):010d}"
+                if fund.get("cik") is not None
+                else "—"
+            ),
+        )
+
+        st.markdown("#### Metric Integrity Audit")
+        i1, i2, i3, i4 = st.columns(4)
+        integrity_status = fund.get("metric_integrity_status", "NOT AVAILABLE")
+        i1.metric("Extraction integrity", integrity_status)
+        i2.metric("Fiscal calendar", fund.get("fiscal_calendar", "UNKNOWN"))
+        i3.metric(
+            "Latest filing age",
+            (
+                f"{int(fund['latest_filed_age_days'])} days"
+                if fund.get("latest_filed_age_days") is not None
+                else "—"
+            ),
+        )
+        checks = fund.get("metric_integrity_checks") or {}
+        pass_count = sum(
+            1 for item in checks.values()
+            if item.get("status") == "PASS"
+        )
+        i4.metric(
+            "Structural pair checks",
+            f"{pass_count}/{len(checks)} PASS" if checks else "—",
+        )
+
+        if integrity_status == "FAIL":
+            st.error(
+                "Metric integrity FAIL — "
+                + str(fund.get("metric_integrity_summary") or "")
+            )
+        elif integrity_status == "REVIEW":
+            st.warning(
+                "Metric integrity REVIEW — "
+                + str(fund.get("metric_integrity_summary") or "")
+            )
+        elif integrity_status == "PASS":
+            st.success(str(fund.get("metric_integrity_summary") or "PASS"))
+
+        provenance_rows = fund.get("metric_integrity_rows") or []
+        if provenance_rows:
+            st.dataframe(
+                pd.DataFrame(provenance_rows),
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.caption(
+                "This table shows the exact SEC concept, unit, current/prior "
+                "periods, duration, filing form and accession used by each YoY calculation."
+            )
+
+        if fund.get("fundamental_reasons"):
+            st.write(
+                "**Fundamental strengths:** "
+                + str(fund["fundamental_reasons"])
+            )
+        if fund.get("fundamental_risks"):
+            st.warning(
+                "Fundamental watch-outs: "
+                + str(fund["fundamental_risks"])
+            )
+
+        source_detail = (
+            f"Revenue concept: {fund.get('revenue_taxonomy') or '—'}:"
+            f"{fund.get('revenue_concept') or '—'} • "
+            f"Earnings concept: {fund.get('earnings_taxonomy') or '—'}:"
+            f"{fund.get('earnings_concept') or '—'}"
+        )
+        st.caption(
+            f"Source: {fund.get('source', 'SEC EDGAR CompanyFacts')} • "
+            f"{source_detail} • No third-party fundamental fallback."
+        )
+
+    return fund
+
+def chart(df, symbol):
+    g = add_indicators(df)
+    fig = go.Figure()
+    fig.add_trace(
+        go.Candlestick(
+            x=g["timestamp"],
+            open=g["open"],
+            high=g["high"],
+            low=g["low"],
+            close=g["close"],
+            name=symbol,
+        )
+    )
+
+    for col, name in [
+        ("ema8", "EMA8"),
+        ("ema20", "EMA20"),
+        ("ma50", "MA50"),
+        ("ma200", "MA200"),
+    ]:
+        fig.add_trace(
+            go.Scatter(
+                x=g["timestamp"],
+                y=g[col],
+                name=name,
+            )
+        )
+
+    fig.update_layout(height=540, xaxis_rangeslider_visible=False)
+    return fig
+
+
+client = get_client()
+if not client:
+    st.error("Alpaca credentials are not configured.")
+    st.info(
+        "Add APCA_API_KEY_ID and APCA_API_SECRET_KEY in "
+        "Streamlit Cloud → App settings → Secrets."
+    )
+    st.stop()
+
+
+# -----------------------------------------------------------------------------
+# Ticker Inspector explicit-action state.
+# Typing a ticker alone does NOT open the Inspector.
+# Only "Inspect ticker" activates it; only "Clear inspector" deactivates it.
+# Run Scanner has NO authority over Inspector visibility/state.
+# -----------------------------------------------------------------------------
+if "scan" not in st.session_state:
+    st.session_state.scan = None
+if "inspector_ticker" not in st.session_state:
+    st.session_state.inspector_ticker = ""
+if "inspector_requested" not in st.session_state:
+    st.session_state.inspector_requested = False
+if "inspector_expanded" not in st.session_state:
+    st.session_state.inspector_expanded = True
+if "inspector_query_input" not in st.session_state:
+    st.session_state.inspector_query_input = st.session_state.inspector_ticker
+
+
+if "fund_validation_requested" not in st.session_state:
+    st.session_state.fund_validation_requested = False
+
+
+if "fund_batch_requested" not in st.session_state:
+    st.session_state.fund_batch_requested = False
+if "fund_batch_result" not in st.session_state:
+    st.session_state.fund_batch_result = None
+
+
+def _submit_inspector_callback():
+    normalized = normalize_ticker(
+        st.session_state.get("inspector_query_input", "")
+    )
+    st.session_state.inspector_ticker = normalized
+    st.session_state.inspector_requested = bool(normalized)
+    st.session_state.inspector_expanded = True
+
+
+def _clear_inspector_callback():
+    st.session_state.inspector_query_input = ""
+    st.session_state.inspector_ticker = ""
+    st.session_state.inspector_requested = False
+    st.session_state.inspector_expanded = False
+
+
+def _run_fund_validation_callback():
+    st.session_state.fund_validation_requested = True
+
+
+def _clear_fund_validation_callback():
+    st.session_state.fund_validation_requested = False
+
+
+def _run_fund_batch_callback():
+    st.session_state.fund_batch_requested = True
+
+
+def _clear_fund_batch_callback():
+    st.session_state.fund_batch_requested = False
+    st.session_state.fund_batch_result = None
+
+
+with st.sidebar:
+    st.header("Scanner controls")
+
+    universe_name = st.selectbox("Stock universe", UNIVERSE_OPTIONS, index=0)
+    preset = st.selectbox(
+        "Quality mode",
+        ["BALANCED", "STRICT", "ELITE", "CUSTOM"],
+        index=1,
+    )
+
+    min_price = st.number_input("Minimum price", 1.0, 500.0, 5.0, 1.0)
+    min_prev_dv = st.number_input(
+        "Minimum previous-day $ volume (M)", 1.0, 500.0, 20.0, 5.0
+    )
+    max_symbols = st.selectbox(
+        "Maximum deep-scan symbols",
+        [500, 1000, 1500, 2000, 3000],
+        index=3,
+    )
+
+    if preset != "CUSTOM":
+        pset = QUALITY_PRESETS[preset]
+        min_avg_dv = pset["min_avg_dollar_volume_20d"] / 1_000_000
+        min_avg_vol = pset["min_avg_volume_20d"] / 1_000_000
+        min_atr = pset["min_atr_pct"]
+        max_atr = pset["max_atr_pct"]
+        min_rs = pset["min_rs_percentile"]
+
+        st.caption(
+            f"{preset}: 20D $Vol ≥ ${min_avg_dv:.0f}M • "
+            f"20D Vol ≥ {min_avg_vol:.2f}M • "
+            f"ATR {min_atr:.1f}-{max_atr:.1f}% • RS ≥ {min_rs:.0f}"
+        )
+    else:
+        with st.expander("Advanced quality filters", expanded=True):
+            min_avg_dv = st.number_input(
+                "Minimum 20D avg $ volume (M)", 1.0, 500.0, 20.0, 5.0
+            )
+            min_avg_vol = st.number_input(
+                "Minimum 20D avg share volume (M)", 0.05, 20.0, 0.50, 0.05
+            )
+            min_atr = st.number_input("Minimum ATR %", 0.1, 20.0, 1.5, 0.1)
+            max_atr = st.number_input("Maximum ATR %", 1.0, 30.0, 10.0, 0.5)
+            min_rs = st.number_input(
+                "Minimum RS percentile", 0.0, 100.0, 60.0, 5.0
+            )
+
+    with st.expander("Trend gates"):
+        require_above_ma50 = st.toggle("Require price > MA50", value=False)
+        require_ma50_above_ma200 = st.toggle(
+            "Require MA50 > MA200", value=False
+        )
+
+    strict = st.toggle("Strict earnings/event gate", value=True)
+    run = st.button("🚀 Run Scanner", type="primary", use_container_width=True)
+
+    st.divider()
+    st.subheader("🔎 Ticker Inspector")
+    st.caption(
+        "Inspect any active Alpaca U.S. equity without changing the scanner "
+        "universe, audit funnel, or candidate buckets."
+    )
+    inspector_reference_choice = st.selectbox(
+        "Reference universe",
+        [AUTO_REFERENCE_LABEL] + list(UNIVERSE_OPTIONS),
+        index=0,
+        help=(
+            "AUTO uses the current Stock universe. A completed compatible scan "
+            "is reused; otherwise the Inspector builds a cached read-only peer "
+            "reference automatically."
+        ),
+    )
+    ticker_query = st.text_input(
+        "Ticker symbol",
+        placeholder="AMZN",
+        max_chars=15,
+        key="inspector_query_input",
+        help=(
+            "Typing a ticker does not open the Inspector. "
+            "Click Inspect ticker to analyze it."
+        ),
+    )
+    inspect_submit = st.button(
+        "Inspect ticker",
+        use_container_width=True,
+        key="inspect_ticker_button",
+        on_click=_submit_inspector_callback,
+    )
+    clear_inspector = st.button(
+        "Clear inspector",
+        use_container_width=True,
+        key="clear_inspector_button",
+        help="Hide and clear the Inspector without changing scanner results.",
+        on_click=_clear_inspector_callback,
+    )
+
+    st.divider()
+    st.subheader("🧪 Fundamental Validation")
+    st.caption(
+        "V1.2.2.2 live SEC cross-company validation: "
+        "AMZN, MSFT, NVDA, UBER and JPM."
+    )
+    st.button(
+        "Run validation suite",
+        use_container_width=True,
+        key="run_fund_validation_button",
+        on_click=_run_fund_validation_callback,
+    )
+    st.button(
+        "Clear validation",
+        use_container_width=True,
+        key="clear_fund_validation_button",
+        on_click=_clear_fund_validation_callback,
+    )
+
+    st.divider()
+    st.subheader("📚 Fundamental Batch Coverage")
+    st.caption(
+        "V1.2.2.3 bounded SHADOW validation over persistent-quality candidates. "
+        "This does not change scanner ranking or buckets."
+    )
+    fund_batch_size = st.selectbox(
+        "Fundamental sample size",
+        [10, 25, 50],
+        index=1,
+        help=(
+            "Use 50 for V1.2.3b robustness acceptance. The batch is selected from "
+            "the completed scanner's highest official Candidate Quality names "
+            "and reuses SEC caches. Smaller samples remain available for diagnostics."
+        ),
+    )
+    st.button(
+        "Build fundamental sample",
+        use_container_width=True,
+        key="run_fund_batch_button",
+        on_click=_run_fund_batch_callback,
+    )
+    st.button(
+        "Clear fundamental sample",
+        use_container_width=True,
+        key="clear_fund_batch_button",
+        on_click=_clear_fund_batch_callback,
+    )
+
+
+cfg = ScannerConfig(
+    min_price=min_price,
+    min_prev_dollar_volume=min_prev_dv * 1_000_000,
+    min_avg_dollar_volume_20d=min_avg_dv * 1_000_000,
+    min_avg_volume_20d=min_avg_vol * 1_000_000,
+    min_atr_pct=min_atr,
+    max_atr_pct=max_atr,
+    min_rs_percentile=min_rs,
+    require_above_ma50=require_above_ma50,
+    require_ma50_above_ma200=require_ma50_above_ma200,
+    max_deep_scan_symbols=max_symbols,
+    strict_event_gate=strict,
+)
+
+inspector_reference_universe = resolve_reference_universe(
+    universe_name,
+    inspector_reference_choice,
+)
+inspector_reference_signature = reference_signature(
+    inspector_reference_universe,
+    cfg.min_price,
+    cfg.min_prev_dollar_volume,
+    cfg.max_deep_scan_symbols,
+    cfg.history_days,
+)
+
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def build_inspector_reference_cached(
+    _client,
+    _cfg,
+    reference_universe_name,
+    cache_signature,
+):
+    """Build the same peer cross-section used by scanner scoring, read-only."""
+    uinfo = load_named_universe(reference_universe_name)
+    selected_symbols = uinfo.symbols
+    universe_member_count = len(selected_symbols) if selected_symbols else None
+
+    regime_syms = list(dict.fromkeys(MARKET_SYMBOLS + list(SECTOR_ETFS.keys())))
+    regime_bars = load_bars(
+        _client,
+        tuple(regime_syms),
+        _cfg.history_days,
+        _cfg.bar_batch_size,
+    )
+    regime = aggregate_regime(regime_bars, MARKET_SYMBOLS)
+
+    universe_df, liquidity_audit = liquid_universe(
+        _client,
+        _cfg,
+        selected_symbols,
+    )
+    if universe_df is None or universe_df.empty:
+        raise RuntimeError(
+            "No securities passed the selected reference universe/liquidity gates."
+        )
+
+    bars = load_bars(
+        _client,
+        tuple(universe_df["symbol"].tolist()),
+        _cfg.history_days,
+        _cfg.bar_batch_size,
+    )
+    if bars is None or bars.empty:
+        raise RuntimeError(
+            "No consolidated SIP history was returned for the reference universe."
+        )
+
+    spy = latest_snapshot(regime_bars[regime_bars["symbol"] == "SPY"])
+    cross_section = build_cross_section(
+        bars,
+        spy.get("ret20"),
+        spy.get("ret50"),
+    )
+    if cross_section is None or cross_section.empty:
+        raise RuntimeError("Reference cross-section could not be constructed.")
+
+    spy_bars = regime_bars[regime_bars["symbol"] == "SPY"].copy()
+    cross_section = add_leadership_features(
+        cross_section,
+        bars,
+        spy_bars,
+    )
+
+    deep_count = int(liquidity_audit.get("deep_scan_count", len(universe_df)))
+    ref_count = int(len(cross_section))
+    coverage = reference_coverage(ref_count, deep_count)
+    confidence = reference_confidence(ref_count, deep_count)
+
+    if not reference_is_usable(ref_count, deep_count):
+        raise RuntimeError(
+            f"Reference integrity gate failed: {ref_count:,}/{deep_count:,} "
+            f"symbols produced usable cross-sectional history "
+            f"({coverage:.1%} coverage). At least 20 peers and 90% coverage "
+            "are required."
+        )
+
+    regime = with_breadth(regime, cross_section)
+
+    return {
+        "universe_name": reference_universe_name,
+        "universe_info": uinfo,
+        "universe_member_count": universe_member_count,
+        "selected_symbols": selected_symbols,
+        "regime": regime,
+        "regime_bars": regime_bars,
+        "bars": bars,
+        "cross_section": cross_section,
+        "liquidity_audit": liquidity_audit,
+        "reference_signature": tuple(cache_signature),
+        "reference_origin": "AUTO-BUILT / CACHED",
+        "reference_count": ref_count,
+        "reference_deep_count": deep_count,
+        "reference_coverage": coverage,
+        "reference_confidence": confidence,
+        "ts": datetime.now(timezone.utc),
+    }
+
+
+def completed_scan_reference(scan):
+    """Copy scan context and attach explicit reference metadata."""
+    ctx = dict(scan)
+    cross = ctx.get("cross_section")
+    liq = ctx.get("liquidity_audit", {}) or {}
+    ref_count = (
+        int(len(cross))
+        if cross is not None and not getattr(cross, "empty", True)
+        else 0
+    )
+    deep_count = int(liq.get("deep_scan_count", ref_count))
+    ctx["reference_origin"] = "COMPLETED SCAN"
+    ctx["reference_count"] = ref_count
+    ctx["reference_deep_count"] = deep_count
+    ctx["reference_coverage"] = reference_coverage(ref_count, deep_count)
+    ctx["reference_confidence"] = reference_confidence(ref_count, deep_count)
+    return ctx
+
+
+def resolve_inspector_reference(
+    client,
+    cfg,
+    requested_universe,
+    requested_signature,
+    current_scan,
+):
+    """Reuse a compatible scan reference or auto-build a read-only one."""
+    if scan_reference_compatible(
+        current_scan,
+        requested_universe,
+        requested_signature,
+    ):
+        ctx = completed_scan_reference(current_scan)
+        if reference_is_usable(
+            ctx["reference_count"],
+            ctx["reference_deep_count"],
+        ):
+            return ctx, None
+
+    try:
+        ctx = build_inspector_reference_cached(
+            client,
+            cfg,
+            requested_universe,
+            tuple(requested_signature),
+        )
+        return ctx, None
+    except Exception as exc:
+        return None, str(exc)
+
+
+if run:
+    # A new scanner run creates a new candidate population. Any previously
+    # built fundamental batch reference must not survive as if it belonged to
+    # the new scan.
+    st.session_state.fund_batch_requested = False
+    st.session_state.fund_batch_result = None
+
+    progress = st.progress(0.03, text="Resolving selected universe...")
+
+    try:
+        uinfo = load_named_universe(universe_name)
+    except Exception as exc:
+        st.error(f"Universe source failed: {exc}")
+        st.info(
+            "No silent fallback was used. Select All U.S. Tradable / Liquid "
+            "or retry later."
+        )
+        st.stop()
+
+    selected_symbols = uinfo.symbols
+    universe_member_count = len(selected_symbols) if selected_symbols else None
+
+    progress.progress(0.10, text="Loading fixed U.S. market regime...")
+    regime_syms = list(dict.fromkeys(MARKET_SYMBOLS + list(SECTOR_ETFS.keys())))
+
+    try:
+        regime_bars = load_bars(
+            client,
+            tuple(regime_syms),
+            cfg.history_days,
+            cfg.bar_batch_size,
+        )
+        regime = aggregate_regime(regime_bars, MARKET_SYMBOLS)
+    except Exception as exc:
+        st.error(f"Historical SIP regime stage failed. Details: {exc}")
+        st.stop()
+
+    progress.progress(
+        0.20,
+        text="Applying completed-session SIP price/liquidity gates...",
+    )
+
+    try:
+        universe_df, liquidity_audit = liquid_universe(
+            client,
+            cfg,
+            selected_symbols,
+        )
+    except Exception as exc:
+        st.error(f"Consolidated SIP liquidity stage failed. Details: {exc}")
+        st.info(
+            "The scanner will not silently fall back to IEX-only volume, "
+            "because that would understate true U.S. market liquidity."
+        )
+        st.stop()
+
+    if universe_df.empty:
+        st.warning("No securities passed the initial universe/liquidity gates.")
+        st.caption(
+            f"Matched to Alpaca: {liquidity_audit['matched_count']:,} • "
+            f"Completed SIP bars: {liquidity_audit['sip_bar_count']:,} • "
+            f"Passed price gate: {liquidity_audit['price_pass_count']:,} • "
+            f"Passed liquidity: {liquidity_audit['liquidity_pass_count']:,}"
+        )
+        st.stop()
+
+    progress.progress(
+        0.38,
+        text=(
+            f"Deep scanning {len(universe_df):,} of "
+            f"{liquidity_audit['liquidity_pass_count']:,} SIP-liquid symbols..."
+        ),
+    )
+
+    try:
+        bars = load_bars(
+            client,
+            tuple(universe_df["symbol"].tolist()),
+            cfg.history_days,
+            cfg.bar_batch_size,
+        )
+    except Exception as exc:
+        st.error(f"Deep historical SIP scan failed. Details: {exc}")
+        st.stop()
+    history_returned_count = (
+        int(bars["symbol"].nunique())
+        if bars is not None and not bars.empty and "symbol" in bars.columns
+        else 0
+    )
+
+    spy = latest_snapshot(regime_bars[regime_bars["symbol"] == "SPY"])
+    cross_section = build_cross_section(
+        bars,
+        spy.get("ret20"),
+        spy.get("ret50"),
+    )
+
+    # V1.2.1 — Leadership & Resilience Engine.
+    # SHADOW MODE by design: the new leadership score is attached and audited,
+    # but does not yet alter eligibility, buckets, or entry decisions.
+    spy_bars = regime_bars[regime_bars["symbol"] == "SPY"].copy()
+    cross_section = add_leadership_features(
+        cross_section,
+        bars,
+        spy_bars,
+    )
+
+    history_min_count = (
+        int((cross_section["bars"] >= cfg.min_history_bars).sum())
+        if cross_section is not None
+        and not cross_section.empty
+        and "bars" in cross_section.columns
+        else 0
+    )
+
+    # Market regime remains fixed. Selected-universe breadth and the 70/30
+    # deployment blend are attached explicitly and separately.
+    regime = with_breadth(regime, cross_section)
+    deployment_score = regime.get("deployment_score", regime.get("score", 0))
+
+    progress.progress(0.70, text="Auditing leadership, then applying persistent quality filters...")
+    eligible, rejected = apply_quality_filters(cross_section, cfg)
+
+    progress.progress(
+        0.82,
+        text=f"Scoring {len(eligible):,} persistent-quality symbols...",
+    )
+    scored = score_universe(eligible, deployment_score, cfg)
+
+    if not scored.empty:
+        scored = scored.merge(universe_df, on="symbol", how="left")
+
+    # V1.3a Contextual Volume Quality — SHADOW ONLY. Keep an exact deep copy
+    # around construction so the live app can prove official scoring is unchanged.
+    # A shadow-layer defect must fail visibly without taking down the frozen scanner.
+    _scored_before_volume_shadow = scored.copy(deep=True)
+    volume_shadow_error = None
+    try:
+        volume_shadow = build_contextual_volume_quality(
+            scored,
+            bars,
+            asof_utc=datetime.now(timezone.utc),
+        )
+        volume_shadow_summary = summarize_contextual_volume_quality(volume_shadow)
+    except Exception as exc:
+        volume_shadow = pd.DataFrame()
+        volume_shadow_summary = summarize_contextual_volume_quality(volume_shadow)
+        volume_shadow_error = str(exc)
+    volume_shadow_official_integrity_pass = scored.equals(_scored_before_volume_shadow)
+
+    # V1.3b Entry Location & Anti-Chase Foundation — SHADOW ONLY. Recompute
+    # continuous extension pressure against the EXISTING frozen hard ceilings.
+    # This must remain a separate diagnostic table and must not alter official
+    # Entry Quality, the binary chase gate, buckets, ranking or trade decisions.
+    _scored_before_entry_location_shadow = scored.copy(deep=True)
+    entry_location_shadow_error = None
+    try:
+        entry_location_shadow = build_entry_location_diagnostics(
+            scored,
+            max_ext_ema8_pct=cfg.max_ext_ema8_pct,
+            max_ext_ema20_pct=cfg.max_ext_ema20_pct,
+            max_ext_atr=cfg.max_ext_atr,
+        )
+        entry_location_shadow_summary = summarize_entry_location_diagnostics(
+            entry_location_shadow
+        )
+    except Exception as exc:
+        entry_location_shadow = pd.DataFrame()
+        entry_location_shadow_summary = summarize_entry_location_diagnostics(
+            entry_location_shadow
+        )
+        entry_location_shadow_error = str(exc)
+    entry_location_official_integrity_pass = scored.equals(
+        _scored_before_entry_location_shadow
+    )
+    entry_location_hard_ceiling_parity_pass = bool(
+        entry_location_shadow_error is None
+        and entry_location_shadow is not None
+        and not entry_location_shadow.empty
+        and entry_location_shadow_summary.get("hard_ceiling_parity_mismatches", 0) == 0
+    )
+
+    # V1.3c Trigger & Entry-Zone Architecture — SHADOW ONLY. The frozen official
+    # scanner still carries entry_px=current close. V1.3c builds a separate
+    # setup-aware structural trigger / zone / max-fill map from prior daily-bar
+    # structure and caps it by the EXISTING frozen hard anti-chase ceilings.
+    _scored_before_entry_zone_shadow = scored.copy(deep=True)
+    entry_zone_shadow_error = None
+    try:
+        entry_zone_shadow = build_entry_zone_diagnostics(
+            scored,
+            bars,
+            max_ext_ema8_pct=cfg.max_ext_ema8_pct,
+            max_ext_ema20_pct=cfg.max_ext_ema20_pct,
+            max_ext_atr=cfg.max_ext_atr,
+        )
+        entry_zone_shadow_summary = summarize_entry_zone_diagnostics(entry_zone_shadow)
+    except Exception as exc:
+        entry_zone_shadow = pd.DataFrame()
+        entry_zone_shadow_summary = summarize_entry_zone_diagnostics(entry_zone_shadow)
+        entry_zone_shadow_error = str(exc)
+    entry_zone_official_integrity_pass = scored.equals(_scored_before_entry_zone_shadow)
+    entry_zone_structure_parity_pass = bool(
+        entry_zone_shadow_error is None
+        and entry_zone_shadow is not None
+        and not entry_zone_shadow.empty
+        and entry_zone_shadow_summary.get("high20_structure_parity_checked", 0) > 0
+        and entry_zone_shadow_summary.get("high20_structure_parity_mismatches", 0) == 0
+    )
+
+
+    bucket_audit = bucket_integrity(scored)
+    starting_count = universe_member_count or liquidity_audit["matched_count"]
+
+    funnel = build_funnel(
+        [
+            ("Starting universe", starting_count),
+            ("Matched to Alpaca", liquidity_audit["matched_count"]),
+            ("Completed SIP bars", liquidity_audit["sip_bar_count"]),
+            (f"Price ≥ ${cfg.min_price:.2f}", liquidity_audit["price_pass_count"]),
+            (
+                f"Previous-day $ volume ≥ {_money_m(cfg.min_prev_dollar_volume)}",
+                liquidity_audit["liquidity_pass_count"],
+            ),
+            ("Selected for deep scan", liquidity_audit["deep_scan_count"]),
+            ("Deep history returned", history_returned_count),
+            (f"History ≥ {cfg.min_history_bars} bars", history_min_count),
+            ("Persistent quality-qualified", len(eligible)),
+            ("Bucket-classified", bucket_audit["classified_count"]),
+        ]
+    )
+
+    st.session_state.scan = {
+        "regime": regime,
+        "regime_bars": regime_bars,
+        "bars": bars,
+        "cross_section": cross_section,
+        "scored": scored,
+        "volume_shadow": volume_shadow,
+        "volume_shadow_summary": volume_shadow_summary,
+        "volume_shadow_official_integrity_pass": volume_shadow_official_integrity_pass,
+        "volume_shadow_error": volume_shadow_error,
+        "entry_location_shadow": entry_location_shadow,
+        "entry_location_shadow_summary": entry_location_shadow_summary,
+        "entry_location_official_integrity_pass": entry_location_official_integrity_pass,
+        "entry_location_hard_ceiling_parity_pass": entry_location_hard_ceiling_parity_pass,
+        "entry_location_shadow_error": entry_location_shadow_error,
+        "entry_zone_shadow": entry_zone_shadow,
+        "entry_zone_shadow_summary": entry_zone_shadow_summary,
+        "entry_zone_official_integrity_pass": entry_zone_official_integrity_pass,
+        "entry_zone_structure_parity_pass": entry_zone_structure_parity_pass,
+        "entry_zone_shadow_error": entry_zone_shadow_error,
+        "rejected": rejected,
+        "universe_name": universe_name,
+        "reference_signature": reference_signature(
+            universe_name,
+            cfg.min_price,
+            cfg.min_prev_dollar_volume,
+            cfg.max_deep_scan_symbols,
+            cfg.history_days,
+        ),
+        "universe_info": uinfo,
+        "universe_member_count": universe_member_count,
+        "selected_symbols": selected_symbols,
+        "liquidity_audit": liquidity_audit,
+        "history_returned_count": history_returned_count,
+        "history_min_count": history_min_count,
+        "eligible_count": len(eligible),
+        "bucket_audit": bucket_audit,
+        "funnel": funnel,
+        "ts": datetime.now(timezone.utc),
+    }
+
+    progress.progress(1.0, text="Scan complete")
+
+
+def _inspector_leadership_row(ticker_row, ticker_bars, spy_bars, reference):
+    """Score one ticker against the current scan's frozen V1.2.1 reference."""
+    row = ticker_row.copy()
+
+    # If already present in the scan reference, use the exact frozen row.
+    if reference is not None and not reference.empty:
+        existing = reference[reference["symbol"] == row["symbol"]]
+        if not existing.empty and "leadership_score" in existing.columns:
+            return existing.iloc[0].copy()
+
+    raw = leadership_module._symbol_leadership_features(
+        ticker_bars,
+        spy_bars,
+        -0.01,
+        60,
+        3,
+    )
+    for key, value in raw.items():
+        row[key] = value
+
+    if reference is None or reference.empty:
+        row["leadership_score"] = float("nan")
+        row["leadership_grade"] = "N/A"
+        row["leadership_reasons"] = ""
+        row["leadership_risks"] = (
+            "No completed scanner cross-section is available for "
+            "cross-sectional Leadership Score ranking."
+        )
+    else:
+        ref = reference[reference["symbol"] != row["symbol"]].copy()
+
+        row["lead_rs20_pct"] = zero_to_100_rank_against_reference(
+            row.get("rs_vs_spy_20"), ref.get("rs_vs_spy_20", pd.Series(dtype=float))
+        )
+        row["lead_rs50_pct"] = zero_to_100_rank_against_reference(
+            row.get("rs_vs_spy_50"), ref.get("rs_vs_spy_50", pd.Series(dtype=float))
+        )
+        row["lead_accel_pct"] = zero_to_100_rank_against_reference(
+            row.get("rs_accel"), ref.get("rs_accel", pd.Series(dtype=float))
+        )
+        stress_excess_pct = zero_to_100_rank_against_reference(
+            row.get("stress_excess_mean"),
+            ref.get("stress_excess_mean", pd.Series(dtype=float)),
+        )
+        stress_win_pct = zero_to_100_rank_against_reference(
+            row.get("stress_outperform_rate"),
+            ref.get("stress_outperform_rate", pd.Series(dtype=float)),
+        )
+        row["lead_stress_excess_pct"] = stress_excess_pct
+        row["lead_stress_win_pct"] = stress_win_pct
+        row["lead_resilience_pct"] = (
+            0.60 * stress_excess_pct + 0.40 * stress_win_pct
+            if pd.notna(stress_excess_pct) and pd.notna(stress_win_pct)
+            else stress_excess_pct if pd.notna(stress_excess_pct) else stress_win_pct
+        )
+        row["lead_rs_high_pct"] = zero_to_100_rank_against_reference(
+            row.get("rs_line_high_gap"),
+            ref.get("rs_line_high_gap", pd.Series(dtype=float)),
+        )
+
+        components = [
+            ("lead_rs20_pct", 0.30),
+            ("lead_rs50_pct", 0.25),
+            ("lead_accel_pct", 0.15),
+            ("lead_resilience_pct", 0.20),
+            ("lead_rs_high_pct", 0.10),
+        ]
+        weighted = []
+        weights = []
+        for col, weight in components:
+            value = row.get(col)
+            if pd.notna(value):
+                weighted.append(float(value) * weight)
+                weights.append(weight)
+        score = sum(weighted) / sum(weights) if weights else float("nan")
+        row["leadership_score"] = score
+        row["leadership_grade"] = leadership_module._grade(score)
+        reasons, risks = leadership_module._explain(pd.Series(row))
+        row["leadership_reasons"] = reasons
+        row["leadership_risks"] = risks
+
+    # User-facing forms retained even when full ranking is unavailable.
+    for raw_col, display_col in [
+        ("rs_vs_spy_20", "rs_vs_spy_20_pct"),
+        ("rs_vs_spy_50", "rs_vs_spy_50_pct"),
+        ("rs_vs_spy_100", "rs_vs_spy_100_pct"),
+        ("rs20_10d_ago", "rs20_10d_ago_pct"),
+        ("rs20_change_10d", "rs20_change_10d_pp"),
+        ("stress_excess_mean", "stress_excess_mean_pct"),
+        ("stress_outperform_rate", "stress_outperform_pct"),
+    ]:
+        value = row.get(raw_col)
+        row[display_col] = 100.0 * float(value) if pd.notna(value) else float("nan")
+
+    capture = row.get("downside_capture")
+    row["downside_capture_pct"] = (
+        100.0 * float(capture) if pd.notna(capture) else float("nan")
+    )
+    return row
+
+
+def inspect_ticker(client, cfg, symbol, reference_scan=None):
+    """Run an audit-safe single-ticker diagnostic.
+
+    The inspector never mutates the frozen scanner result. When a completed scan
+    is available, percentile-based RS/Leadership and legacy quality scoring use
+    that scan as the reference distribution.
+    """
+    symbol = normalize_ticker(symbol)
+    if not symbol:
+        return {"error": "Enter a valid U.S. ticker symbol, for example AMZN."}
+
+    asset = resolve_asset(load_assets(client), symbol)
+    if asset is None:
+        return {
+            "error": (
+                f"{symbol} could not be resolved to one unique active Alpaca "
+                "U.S. equity."
+            )
+        }
+
+    resolved = str(asset.get("symbol", symbol)).upper()
+    active = asset.get("status") == "active"
+    tradable = bool(asset.get("tradable"))
+    exchange = asset.get("exchange", "—")
+
+    if reference_scan is not None:
+        reference_name = reference_scan.get("universe_name", "Current reference")
+        selected_symbols = reference_scan.get("selected_symbols")
+        if selected_symbols is None:
+            try:
+                selected_symbols = reference_scan["universe_info"].symbols
+            except Exception:
+                selected_symbols = None
+        reference_cross = reference_scan.get("cross_section")
+        regime_bars = reference_scan.get("regime_bars")
+        regime = reference_scan.get("regime", {})
+        reference_origin = reference_scan.get("reference_origin", "COMPLETED SCAN")
+        reference_count = int(
+            reference_scan.get(
+                "reference_count",
+                len(reference_cross)
+                if reference_cross is not None
+                and not getattr(reference_cross, "empty", True)
+                else 0,
+            )
+        )
+        reference_deep_count = int(
+            reference_scan.get("reference_deep_count", reference_count)
+        )
+        reference_cov = float(
+            reference_scan.get(
+                "reference_coverage",
+                reference_coverage(reference_count, reference_deep_count),
+            )
+        )
+        reference_conf = reference_scan.get(
+            "reference_confidence",
+            reference_confidence(reference_count, reference_deep_count),
+        )
+    else:
+        reference_name = "Reference unavailable"
+        selected_symbols = None
+        reference_cross = None
+        reference_origin = "UNAVAILABLE"
+        reference_count = 0
+        reference_deep_count = 0
+        reference_cov = 0.0
+        reference_conf = "LOW"
+        regime_syms = list(dict.fromkeys(MARKET_SYMBOLS + list(SECTOR_ETFS.keys())))
+        regime_bars = load_bars(
+            client,
+            tuple(regime_syms),
+            cfg.history_days,
+            cfg.bar_batch_size,
+        )
+        regime = aggregate_regime(regime_bars, MARKET_SYMBOLS)
+
+    membership = in_selected_universe(resolved, selected_symbols)
+
+    prev = load_prev_daily_bars(client, (resolved,), cfg.snapshot_batch_size)
+    liq = liquidity_diagnostic(
+        prev.get(resolved),
+        cfg.min_price,
+        cfg.min_prev_dollar_volume,
+    )
+
+    ticker_bars = load_bars(
+        client,
+        (resolved,),
+        cfg.history_days,
+        cfg.bar_batch_size,
+    )
+    if ticker_bars is None or ticker_bars.empty:
+        return {
+            "error": f"No usable historical SIP daily bars were returned for {resolved}."
+        }
+
+    spy_bars = regime_bars[regime_bars["symbol"] == "SPY"].copy()
+    spy_snapshot = latest_snapshot(spy_bars)
+
+    one = build_cross_section(
+        ticker_bars,
+        spy_snapshot.get("ret20"),
+        spy_snapshot.get("ret50"),
+    )
+    if one is None or one.empty:
+        return {
+            "error": (
+                f"{resolved} does not have enough usable daily history to build "
+                "the technical cross-section."
+            )
+        }
+
+    row = one.iloc[0].copy()
+    row["symbol"] = resolved
+
+    if reference_cross is not None and not reference_cross.empty:
+        existing = reference_cross[reference_cross["symbol"] == resolved]
+        if not existing.empty:
+            # Exact frozen reference row when this symbol was already deep-scanned.
+            row = existing.iloc[0].copy()
+        else:
+            ref = reference_cross[reference_cross["symbol"] != resolved]
+            row["rs20_pct"] = pct_rank_against_reference(
+                row.get("rs20"), ref.get("rs20", pd.Series(dtype=float))
+            )
+            row["rs50_pct"] = pct_rank_against_reference(
+                row.get("rs50"), ref.get("rs50", pd.Series(dtype=float))
+            )
+            row["rs_score"] = 0.60 * row["rs20_pct"] + 0.40 * row["rs50_pct"]
+
+    leadership_row = _inspector_leadership_row(
+        row,
+        ticker_bars,
+        spy_bars,
+        reference_cross,
+    )
+    for key, value in leadership_row.items():
+        row[key] = value
+
+    has_reference = reference_cross is not None and not reference_cross.empty
+
+    if has_reference:
+        eligible_df, rejected_df = apply_quality_filters(
+            pd.DataFrame([row]),
+            cfg,
+        )
+        persistent_pass = not eligible_df.empty
+        gate_reasons = (
+            ""
+            if persistent_pass
+            else str(rejected_df.iloc[0].get("eligibility_reasons", ""))
+        )
+    else:
+        persistent_pass = None
+        gate_reasons = (
+            "Cross-sectional RS reference required before persistent-quality "
+            "eligibility can be determined."
+        )
+
+    deployment_score = regime.get("deployment_score", regime.get("score", 0))
+    diagnostic_scored = score_universe(
+        pd.DataFrame([row]),
+        deployment_score,
+        cfg,
+    )
+    scored_row = (
+        diagnostic_scored.iloc[0].copy()
+        if diagnostic_scored is not None and not diagnostic_scored.empty
+        else pd.Series(dtype=object)
+    )
+
+    if not has_reference and not scored_row.empty:
+        # Hard integrity gate: single-ticker/self-ranked RS must never leak into
+        # official Candidate Quality or scanner classification.
+        scored_row["quality_score"] = np.nan
+        scored_row["quality_reasons"] = ""
+        scored_row["bucket"] = "NOT RANKED"
+        scored_row["decision"] = "NOT RANKED"
+
+    return {
+        "symbol": resolved,
+        "asset": asset,
+        "active": active,
+        "tradable": tradable,
+        "exchange": exchange,
+        "reference_name": reference_name,
+        "reference_origin": reference_origin,
+        "reference_count": reference_count,
+        "reference_deep_count": reference_deep_count,
+        "reference_coverage": reference_cov,
+        "reference_confidence": reference_conf,
+        "membership": membership,
+        "liquidity": liq,
+        "bars": ticker_bars,
+        "row": row,
+        "persistent_pass": persistent_pass,
+        "gate_reasons": gate_reasons,
+        "diagnostic": scored_row,
+        "has_reference": has_reference,
+        "scan_ts": (
+            reference_scan.get("ts") if reference_scan is not None else None
+        ),
+    }
+
+
+def render_ticker_inspector(result, cfg, show_title=True):
+    if result.get("error"):
+        st.error(result["error"])
+        return
+
+    symbol = result["symbol"]
+    row = result["row"]
+    diag = result["diagnostic"]
+    liq = result["liquidity"]
+
+    authority = inspector_authority(
+        result["has_reference"],
+        result["persistent_pass"],
+        liq["status"],
+        diag.get("bucket") if not diag.empty else None,
+    )
+
+    if show_title:
+        st.subheader(f"🔎 Ticker Inspector — {symbol}")
+    if result["has_reference"]:
+        st.caption(
+            f"Cross-sectional reference: {result['reference_name']} • "
+            f"{result['reference_origin']} • "
+            f"N={result['reference_count']:,}/{result['reference_deep_count']:,} "
+            f"({result['reference_coverage']:.1%} coverage) • "
+            f"Reference Confidence: {result['reference_confidence']} • "
+            "Read-only: scanner counts and buckets are not changed."
+        )
+    else:
+        st.caption(
+            f"Requested cross-sectional reference: "
+            f"{result.get('requested_reference_name', result['reference_name'])} • "
+            "Reference unavailable • Read-only: scanner counts and buckets are not changed."
+        )
+
+    i1, i2, i3, i4, i5, i6 = st.columns(6)
+    i1.metric("Alpaca status", "ACTIVE" if result["active"] else "NOT ACTIVE")
+    i2.metric("Tradable", "YES" if result["tradable"] else "NO")
+    i3.metric("Exchange", result["exchange"])
+    membership = result["membership"]
+    i4.metric(
+        "Reference-universe member",
+        "ALL U.S." if membership is None else ("YES" if membership else "NO"),
+    )
+    i5.metric("SIP liquidity gate", liq["status"])
+    i6.metric(
+        "Persistent quality",
+        authority["persistent_quality"],
+    )
+
+    if not result["has_reference"]:
+        ref_error = result.get("reference_error")
+        st.warning(
+            "Automatic peer-reference construction did not produce a trusted "
+            "cross-section. Direct technical, entry, and raw leadership "
+            "diagnostics remain available, but percentile-dependent outputs "
+            "stay REF REQUIRED as a fail-safe."
+            + (f" Reference error: {ref_error}" if ref_error else "")
+        )
+
+    if liq["status"] != "PASS":
+        st.warning("Initial liquidity gate: " + liq["reason"])
+
+    if result["has_reference"] and result["persistent_pass"] is False:
+        st.warning(
+            "Persistent-quality gate: FAIL"
+            + (f" — {result['gate_reasons']}" if result["gate_reasons"] else "")
+        )
+        st.caption(
+            "Quality/entry values below are diagnostic only. A failed "
+            "persistent-quality gate cannot become an official scanner candidate."
+        )
+
+    t1, t2, t3, t4, t5 = st.columns(5)
+    t1.metric(
+        "Previous close",
+        f"${liq['prev_close']:,.2f}" if pd.notna(liq["prev_close"]) else "—",
+    )
+    t2.metric(
+        "Previous $ volume",
+        _money_m2(liq["prev_dollar_volume"]),
+    )
+    t3.metric(
+        "20D avg $ volume",
+        _money_m(row.get("avg_dollar_volume20")),
+    )
+    t4.metric(
+        "ATR %",
+        f"{row.get('atr_pct'):.2f}%"
+        if pd.notna(row.get("atr_pct"))
+        else "—",
+    )
+    t5.metric(
+        "History",
+        f"{int(row.get('bars', 0))} bars",
+    )
+
+    st.markdown("#### Quality Engine snapshot")
+    q1, q2, q3, q4, q5 = st.columns(5)
+    q1.metric(
+        "Candidate Quality",
+        (
+            f"{diag.get('quality_score'):.1f}/100"
+            if authority["candidate_quality_authoritative"]
+            and pd.notna(diag.get("quality_score"))
+            else "REF REQUIRED"
+        ),
+    )
+    q2.metric(
+        "Leadership",
+        (
+            f"{row.get('leadership_score'):.1f}/100"
+            if authority["leadership_authoritative"]
+            and pd.notna(row.get("leadership_score"))
+            else "REF REQUIRED"
+        ),
+    )
+    q3.metric(
+        "Entry Quality" if result["has_reference"] else "Entry Quality (diagnostic)",
+        f"{diag.get('entry_score'):.1f}/100"
+        if pd.notna(diag.get("entry_score"))
+        else "—",
+    )
+    q4.metric(
+        "Legacy RS",
+        (
+            f"{row.get('rs_score'):.1f} %ile"
+            if authority["legacy_rs_authoritative"]
+            and pd.notna(row.get("rs_score"))
+            else "REF REQUIRED"
+        ),
+    )
+    q5.metric(
+        "Inspector engine status",
+        authority["official_status"],
+    )
+
+    if authority["candidate_quality_authoritative"] and pd.notna(diag.get("quality_score")):
+        st.write(
+            f"**Why quality:** {diag.get('quality_reasons', '') or '—'}"
+        )
+    if pd.notna(diag.get("entry_score")):
+        st.write(
+            f"**Why entry:** {diag.get('entry_reasons', '') or '—'}"
+        )
+        if diag.get("chase_reasons"):
+            st.warning("Anti-chase gate: " + str(diag["chase_reasons"]))
+
+    with st.expander(
+        "Leadership & Resilience — Explainable View",
+        expanded=True,
+    ):
+        l1, l2, l3, l4, l5 = st.columns(5)
+        l1.metric(
+            "Leadership grade",
+            row.get("leadership_grade", "N/A")
+            if result["has_reference"]
+            else "REF REQUIRED",
+        )
+        l2.metric(
+            "RS vs SPY • 20D",
+            f"{row.get('rs_vs_spy_20_pct'):+.1f}%"
+            if pd.notna(row.get("rs_vs_spy_20_pct"))
+            else "—",
+        )
+        l3.metric(
+            "RS vs SPY • 50D",
+            f"{row.get('rs_vs_spy_50_pct'):+.1f}%"
+            if pd.notna(row.get("rs_vs_spy_50_pct"))
+            else "—",
+        )
+        l4.metric(
+            "RS vs SPY • 100D",
+            f"{row.get('rs_vs_spy_100_pct'):+.1f}%"
+            if pd.notna(row.get("rs_vs_spy_100_pct"))
+            else "—",
+        )
+        l5.metric(
+            "Leadership Data Confidence",
+            row.get("leadership_confidence", "LOW"),
+        )
+
+        old_rs20 = row.get("rs20_10d_ago_pct")
+        now_rs20 = row.get("rs_vs_spy_20_pct")
+        change_pp = row.get("rs20_change_10d_pp")
+        if pd.notna(old_rs20) and pd.notna(now_rs20) and pd.notna(change_pp):
+            state = (
+                "ACCELERATING" if change_pp >= 1.0
+                else "DECELERATING" if change_pp <= -1.0
+                else "STABLE"
+            )
+            st.write(
+                f"**Relative momentum:** RS20 {old_rs20:+.1f}% → "
+                f"{now_rs20:+.1f}% over 10 sessions "
+                f"({change_pp:+.1f}pp) — **{state}**"
+            )
+
+        stress_days = int(row.get("stress_day_count", 0) or 0)
+        stress_wins = int(row.get("stress_win_count", 0) or 0)
+        stress_rate = row.get("stress_outperform_pct")
+        stress_excess = row.get("stress_excess_mean_pct")
+        capture_pct = row.get("downside_capture_pct")
+        capture_label = row.get("downside_capture_label", "N/A")
+        st.write(
+            "**Market stress:** "
+            + (
+                f"beat SPY {stress_wins}/{stress_days} sessions "
+                f"({stress_rate:.0f}%), avg excess {stress_excess:+.2f}%, "
+                f"downside capture {capture_pct:.0f}% — {capture_label}"
+                if stress_days
+                and pd.notna(stress_rate)
+                and pd.notna(stress_excess)
+                and pd.notna(capture_pct)
+                else "insufficient stress data"
+            )
+        )
+        if pd.notna(capture_pct):
+            st.caption(
+                f"On selected SPY stress sessions the stock lost about "
+                f"{capture_pct / 100.0:.2f}× as much as SPY in aggregate."
+            )
+
+        rs_index = row.get("rs_line_index")
+        rs_gap = row.get("rs_line_high_gap_pct")
+        if pd.notna(rs_index) and pd.notna(rs_gap):
+            st.write(
+                f"**RS line:** {rs_index:.1f}/100 — "
+                f"{abs(rs_gap):.1f}% below its 100D relative-strength peak."
+            )
+
+        st.write(
+            f"**Leadership strengths:** "
+            f"{row.get('leadership_reasons', '') or '—'}"
+        )
+        if row.get("leadership_risks"):
+            st.warning(
+                "Leadership watch-outs: "
+                + str(row["leadership_risks"])
+            )
+
+    render_fundamental_quality(
+        symbol,
+        expanded=True,
+        key_prefix="inspector_fund",
+    )
+
+    if not result["has_reference"]:
+        st.info(
+            "Inspector conclusion: DIRECT DIAGNOSTICS ONLY — automatic "
+            "reference construction failed its integrity gate, so percentile-"
+            "dependent quality/leadership/eligibility remains blocked."
+        )
+    elif result["persistent_pass"] and liq["status"] == "PASS":
+        st.success(
+            f"Inspector conclusion: {diag.get('decision', '—')} • "
+            f"Bucket: {diag.get('bucket', '—')}"
+        )
+    else:
+        st.info(
+            "Inspector conclusion: diagnostic only — this ticker does not "
+            "currently satisfy every scanner gate."
+        )
+
+    st.plotly_chart(
+        chart(result["bars"], symbol),
+        use_container_width=True,
+        key=f"inspector_chart_{symbol}",
+    )
+
+
+
+res = st.session_state.scan
+
+if st.session_state.inspector_requested:
+    if not st.session_state.inspector_ticker:
+        st.error("Enter a valid ticker symbol, for example AMZN.")
+    else:
+        try:
+            with st.spinner(
+                f"Preparing {inspector_reference_universe} peer reference..."
+            ):
+                inspector_reference_ctx, inspector_reference_error = (
+                    resolve_inspector_reference(
+                        client,
+                        cfg,
+                        inspector_reference_universe,
+                        inspector_reference_signature,
+                        res,
+                    )
+                )
+
+            inspector_result = inspect_ticker(
+                client,
+                cfg,
+                st.session_state.inspector_ticker,
+                inspector_reference_ctx,
+            )
+            inspector_result["requested_reference_name"] = (
+                inspector_reference_universe
+            )
+            inspector_result["reference_error"] = inspector_reference_error
+
+            if inspector_result.get("error"):
+                inspector_label = (
+                    f"🔎 Ticker Inspector — "
+                    f"{st.session_state.inspector_ticker} | ERROR"
+                )
+            else:
+                authority = inspector_authority(
+                    inspector_result["has_reference"],
+                    inspector_result["persistent_pass"],
+                    inspector_result["liquidity"]["status"],
+                    inspector_result["diagnostic"].get("bucket")
+                    if not inspector_result["diagnostic"].empty
+                    else None,
+                )
+                lead_grade = (
+                    inspector_result["row"].get("leadership_grade", "N/A")
+                    if inspector_result["has_reference"]
+                    else "REF REQUIRED"
+                )
+                legacy_rs = inspector_result["row"].get("rs_score")
+                rs_label = (
+                    f"{legacy_rs:.1f}%ile"
+                    if inspector_result["has_reference"] and pd.notna(legacy_rs)
+                    else "REF REQUIRED"
+                )
+                inspector_label = (
+                    f"🔎 Ticker Inspector — {inspector_result['symbol']} | "
+                    f"{authority['official_status']} | Leadership {lead_grade} | "
+                    f"RS {rs_label}"
+                )
+
+            with st.expander(
+                inspector_label,
+                expanded=st.session_state.inspector_expanded,
+            ):
+                render_ticker_inspector(
+                    inspector_result,
+                    cfg,
+                    show_title=False,
+                )
+            st.divider()
+        except Exception as exc:
+            st.error(f"Ticker Inspector failed safely: {exc}")
+            st.caption(
+                "The scanner result was not changed. Ticker Inspector is "
+                "read-only by design."
+            )
+
+if st.session_state.fund_validation_requested:
+    render_fundamental_validation_suite()
+    st.divider()
+
+if not res:
+    st.info(
+        "Ticker Inspector is self-contained: it automatically builds/reuses "
+        "the selected peer reference for complete cross-sectional scoring. "
+        "Run Scanner only when you want the full universe audit and candidate dashboard."
+    )
+    st.stop()
+
+regime = res["regime"]
+scored = res["scored"]
+liq = res["liquidity_audit"]
+bucket_audit = res["bucket_audit"]
+
+if st.session_state.fund_batch_requested:
+    render_fundamental_batch_coverage(
+        res,
+        fund_batch_size,
+    )
+    st.divider()
+
+
+# -----------------------------------------------------------------------------
+# 1) Scanner audit integrity
+# -----------------------------------------------------------------------------
+st.subheader("1) Universe & Scanner Audit")
+
+u1, u2, u3, u4, u5, u6 = st.columns(6)
+u1.metric("Selected universe", res["universe_name"])
+u2.metric(
+    "Universe members",
+    f'{res["universe_member_count"]:,}'
+    if res["universe_member_count"]
+    else f'{liq["matched_count"]:,} Alpaca active',
+)
+u3.metric("Matched to Alpaca", f'{liq["matched_count"]:,}')
+u4.metric("Passed SIP liquidity", f'{liq["liquidity_pass_count"]:,}')
+u5.metric("Deep-scanned", f'{liq["deep_scan_count"]:,}')
+u6.metric("Persistent quality", f'{res["eligible_count"]:,}')
+
+st.caption(
+    f'Source: {res["universe_info"].source} • '
+    f'Type: {res["universe_info"].source_type} • '
+    f'{res["universe_info"].note}'
+)
+
+if liq["deep_scan_capped"]:
+    st.warning(
+        f"Deep-scan cap active: {liq['liquidity_pass_count']:,} securities passed "
+        f"the SIP liquidity gate, but only the top {liq['deep_scan_count']:,} by "
+        "previous-session dollar volume were deep-scanned."
+    )
+
+st.info(
+    "Data integrity: previous-day liquidity uses the last fully completed "
+    f"{client.creds.historical_feed.upper()} daily bar; deep history uses "
+    f"{client.creds.historical_feed.upper()} with a ≥20-minute cutoff. "
+    f"Latest/snapshot feed configured as {client.creds.feed.upper()}. "
+    "IEX-only volume is not used for consolidated liquidity gates."
+)
+
+with st.expander("🔎 Scanner Audit Integrity", expanded=True):
+    if bucket_audit["reconciled"] and bucket_audit["classified_count"] == res["eligible_count"]:
+        st.success(
+            "PASS — every persistent-quality symbol is accounted for in exactly "
+            f"one candidate bucket ({bucket_audit['classified_count']:,}/"
+            f"{res['eligible_count']:,})."
+        )
+    else:
+        st.error(
+            "FAIL — candidate accounting does not reconcile. "
+            f"Quality-qualified: {res['eligible_count']:,}; "
+            f"classified: {bucket_audit['classified_count']:,}; "
+            f"unknown bucket rows: {bucket_audit['unknown_count']:,}."
+        )
+        if bucket_audit["unknown_buckets"]:
+            st.write("Unknown buckets:", ", ".join(bucket_audit["unknown_buckets"]))
+
+    funnel_view = res["funnel"].copy()
+    for col in ["% of prior stage", "% of starting universe"]:
+        funnel_view[col] = funnel_view[col].map(
+            lambda x: "—" if pd.isna(x) else f"{float(x):.1f}%"
+        )
+    st.dataframe(funnel_view, use_container_width=True, hide_index=True)
+
+    d1, d2, d3, d4, d5 = st.columns(5)
+    d1.metric(
+        "Usable SIP coverage",
+        f'{_pct(liq["usable_sip_count"], liq["matched_count"]):.1f}%',
+        help="Usable completed-session SIP bars divided by Alpaca-matched symbols.",
+    )
+    d2.metric("Missing SIP bars", f'{liq["missing_sip_count"]:,}')
+    d3.metric("Prev $Vol P25", _money_m(liq["q25"]))
+    d4.metric("Prev $Vol median", _money_m(liq["median"]))
+    d5.metric("Prev $Vol P75", _money_m(liq["q75"]))
+
+    unmatched = liq.get("unmatched_symbols", [])
+    if unmatched:
+        with st.expander(
+            f"Unmatched universe symbols ({len(unmatched):,})",
+            expanded=False,
+        ):
+            st.caption(
+                "These source-universe symbols did not match an active/tradable "
+                "Alpaca U.S. equity after canonical symbol normalization."
+            )
+            st.dataframe(
+                pd.DataFrame({"symbol": unmatched}),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    cutoff = liq["cutoff_sample"]
+    if cutoff is not None and not cutoff.empty:
+        st.caption(
+            "Securities nearest the previous-session dollar-volume cutoff — "
+            "use this to sanity-check the SIP liquidity boundary."
+        )
+        cutoff_view = cutoff[
+            [
+                "symbol",
+                "bar_timestamp",
+                "snapshot_price",
+                "previous_volume",
+                "prev_dollar_volume",
+                "liquidity_status",
+            ]
+        ].copy()
+        cutoff_view = cutoff_view.rename(
+            columns={"snapshot_price": "prev_close"},
+        )
+        cutoff_view["prev_close"] = cutoff_view["prev_close"].map(
+            lambda x: f"${x:,.2f}"
+        )
+        cutoff_view["previous_volume"] = cutoff_view["previous_volume"].map(
+            lambda x: f"{x:,.0f}"
+        )
+        cutoff_view["prev_dollar_volume"] = cutoff_view["prev_dollar_volume"].map(
+            _money_m2
+        )
+        st.dataframe(cutoff_view, use_container_width=True, hide_index=True)
+
+    if res["rejected"] is not None and not res["rejected"].empty:
+        reason_counts = (
+            res["rejected"]["eligibility_reasons"]
+            .fillna("")
+            .str.split("; ")
+            .explode()
+            .replace("", pd.NA)
+            .dropna()
+            .value_counts()
+            .head(10)
+        )
+        if not reason_counts.empty:
+            st.caption("Top persistent-quality rejection reasons")
+            st.dataframe(
+                reason_counts.rename("count").to_frame(),
+                use_container_width=True,
+            )
+
+
+# -----------------------------------------------------------------------------
+# 2) Market regime, selected-universe breadth, deployment regime
+# -----------------------------------------------------------------------------
+st.subheader("2) Market & Deployment Regime")
+
+breadth = regime.get("breadth", {})
+r1, r2, r3, r4 = st.columns(4)
+r1.metric("U.S. Market Regime", regime["label"])
+r2.metric("Market score", f'{regime["score"]:.0f}/100')
+r3.metric(
+    "Selected-universe breadth",
+    f'{breadth.get("breadth_score", 0):.1f}/100' if breadth else "—",
+)
+r4.metric(
+    "Deployment score",
+    f'{regime.get("deployment_score", regime["score"]):.0f}/100',
+)
+
+if breadth:
+    b1, b2, b3, b4 = st.columns(4)
+    b1.metric("% > EMA20", f'{breadth["above_ema20_pct"]:.1f}%')
+    b2.metric("% > MA50", f'{breadth["above_ma50_pct"]:.1f}%')
+    b3.metric("% > MA200", f'{breadth["above_ma200_pct"]:.1f}%')
+    b4.metric(
+        "% > EMA20 & MA50",
+        f'{breadth["above_ema20_and_ma50_pct"]:.1f}%',
+    )
+
+st.caption(
+    "U.S. Market Regime is fixed from SPY/QQQ/IWM and does not change merely "
+    "because a different stock universe is selected. Deployment score = 70% "
+    "market regime + 30% selected-universe breadth."
+)
+st.info(
+    f"Deployment: {regime.get('deployment_label', regime['label'])} • "
+    f"Exposure: {regime.get('deployment_exposure', regime['exposure'])}"
+)
+
+
+# -----------------------------------------------------------------------------
+# V1.2.1 Quality Engine — leadership/resilience shadow validation
+# -----------------------------------------------------------------------------
+st.subheader("3) Candidate Quality Engine — Leadership & Resilience (Explainable)")
+st.info(
+    "V1.2.1.1 SHADOW MODE: Leadership & Resilience is calculated independently "
+    "and displayed for validation. It does NOT yet change persistent-quality "
+    "eligibility, candidate buckets, entry quality, or trade decisions."
+)
+
+lead_valid = scored["leadership_score"].dropna() if "leadership_score" in scored.columns else pd.Series(dtype=float)
+if not lead_valid.empty:
+    q1, q2, q3, q4 = st.columns(4)
+    q1.metric("Leadership median", f"{lead_valid.median():.1f}/100")
+    q2.metric("A / A+ leadership", f"{int((lead_valid >= 80).sum()):,}")
+    q3.metric("Elite A+ ≥90", f"{int((lead_valid >= 90).sum()):,}")
+    high_conf = (
+        int((scored["leadership_confidence"] == "HIGH").sum())
+        if "leadership_confidence" in scored.columns
+        else 0
+    )
+    q4.metric("High Leadership Data Confidence", f"{high_conf:,}/{len(scored):,}")
+
+    st.caption(
+        "Leadership composite: 30% RS20 + 25% RS50 + 15% RS acceleration + "
+        "20% SPY-pullback resilience + 10% RS-line proximity to its 100D high."
+    )
+
+st.markdown("### 3B) Fundamental Quality — Revenue & Earnings")
+st.info(
+    "V1.2.3a ATTRIBUTION MODE: single-ticker Fundamental Quality remains "
+    "independently visible. The frozen bounded batch supplies the audited "
+    "cross-sectional input for composite attribution; official scanner "
+    "eligibility, ranking, buckets, Entry Quality and trade decisions remain frozen."
+)
+
+st.divider()
+render_contextual_volume_quality(res)
+
+st.divider()
+render_entry_location_diagnostics(res)
+
+st.divider()
+render_entry_zone_diagnostics(res)
+
+# -----------------------------------------------------------------------------
+# 4) Candidate accounting and buckets
+# -----------------------------------------------------------------------------
+st.subheader("4) Swing Candidates")
+
+if scored is None or scored.empty:
+    st.warning(
+        "No symbols passed all persistent-quality filters. "
+        "NO TRADE is a valid result."
+    )
+    st.stop()
+
+bucket_display = {
+    "ACTIONABLE NOW": "ACTIONABLE NOW",
+    "TECH + EVENT CHECK": "TECH ACTIONABLE — EVENT CHECK",
+    "A-QUALITY — WAIT": "A-QUALITY — WAIT",
+    "WAIT / ENTRY NOT READY": "WAIT",
+    "DEVELOPING": "DEVELOPING",
+    "AVOID / BROKEN": "AVOID / BROKEN",
+    "ALL": "ALL",
+}
+
+counts = bucket_audit["counts"]
+count_cols = st.columns(6)
+metric_labels = [
+    ("ACTIONABLE NOW", "ACTIONABLE NOW"),
+    ("TECH + EVENT CHECK", "TECH ACTIONABLE — EVENT CHECK"),
+    ("A-QUALITY — WAIT", "A-QUALITY — WAIT"),
+    ("WAIT / ENTRY NOT READY", "WAIT"),
+    ("DEVELOPING", "DEVELOPING"),
+    ("AVOID / BROKEN", "AVOID / BROKEN"),
+]
+for i, (display, code) in enumerate(metric_labels):
+    count_cols[i].metric(display, counts.get(code, 0))
+
+st.caption(
+    "Bucket reconciliation: "
+    f"{bucket_audit['classified_count']:,} classified = "
+    f"{res['eligible_count']:,} persistent-quality qualified."
+)
+
+bucket_label = st.radio(
+    "Bucket",
+    list(bucket_display.keys()),
+    horizontal=True,
+)
+bucket_code = bucket_display[bucket_label]
+view = scored if bucket_code == "ALL" else scored[scored["bucket"] == bucket_code]
+
+cols = [
+    "symbol",
+    "bucket",
+    "setup",
+    "quality_score",
+    "leadership_score",
+    "leadership_grade",
+    "entry_score",
+    "rs_score",
+    "rs_vs_spy_20_pct",
+    "rs_vs_spy_50_pct",
+    "rs_vs_spy_100_pct",
+    "rs20_10d_ago_pct",
+    "rs20_change_10d_pp",
+    "stress_win_count",
+    "stress_day_count",
+    "stress_outperform_pct",
+    "stress_excess_mean_pct",
+    "downside_capture_pct",
+    "downside_capture_label",
+    "rs_line_index",
+    "rs_line_high_gap_pct",
+    "leadership_confidence",
+    "close",
+    "atr_pct",
+    "avg_dollar_volume20",
+    "ext_ema8_pct",
+    "ext_ema20_pct",
+    "ext_atr",
+    "vol_ratio",
+    "entry_px",
+    "stop",
+    "t1",
+    "t2",
+    "event_confidence",
+    "quality_reasons",
+    "entry_reasons",
+    "chase_reasons",
+]
+
+st.dataframe(
+    view[[c for c in cols if c in view.columns]].head(150),
+    use_container_width=True,
+    hide_index=True,
+)
+
+
+# -----------------------------------------------------------------------------
+# 4) Candidate detail
+# -----------------------------------------------------------------------------
+st.subheader("5) Candidate Detail")
+
+sel = st.selectbox("Symbol", scored["symbol"].head(100).tolist())
+row = scored[scored["symbol"] == sel].iloc[0]
+symbol_bars = res["bars"][res["bars"]["symbol"] == sel]
+
+m1, m2, m3, m4, m5 = st.columns(5)
+m1.metric("Candidate Quality", f'{row["quality_score"]:.1f}/100')
+m2.metric(
+    "Leadership (shadow)",
+    f'{row.get("leadership_score", float("nan")):.1f}/100'
+    if pd.notna(row.get("leadership_score"))
+    else "—",
+)
+m3.metric("Entry Quality", f'{row["entry_score"]:.1f}/100')
+m4.metric("Legacy RS", f'{row["rs_score"]:.1f} %ile')
+m5.metric("Decision", row["decision"])
+
+st.write(f'**Why quality:** {row.get("quality_reasons", "") or "—"}')
+st.write(f'**Why entry:** {row.get("entry_reasons", "") or "—"}')
+
+with st.expander("V1.2.1.1 Leadership & Resilience — Explainable View", expanded=True):
+    st.markdown("#### Relative leadership")
+    l1, l2, l3, l4, l5 = st.columns(5)
+    l1.metric("Leadership grade", row.get("leadership_grade", "N/A"))
+    l2.metric(
+        "RS vs SPY • 20D",
+        f'{row.get("rs_vs_spy_20_pct", float("nan")):+.1f}%'
+        if pd.notna(row.get("rs_vs_spy_20_pct"))
+        else "—",
+        help="Stock return relative to SPY over the latest 20 trading sessions.",
+    )
+    l3.metric(
+        "RS vs SPY • 50D",
+        f'{row.get("rs_vs_spy_50_pct", float("nan")):+.1f}%'
+        if pd.notna(row.get("rs_vs_spy_50_pct"))
+        else "—",
+        help="Intermediate-term relative performance versus SPY.",
+    )
+    l4.metric(
+        "RS vs SPY • 100D",
+        f'{row.get("rs_vs_spy_100_pct", float("nan")):+.1f}%'
+        if pd.notna(row.get("rs_vs_spy_100_pct"))
+        else "—",
+        help="Longer-term leadership context. Display-only in V1.2.1.1; it does not change the validated Leadership Score.",
+    )
+    l5.metric(
+        "Leadership Data Confidence",
+        row.get("leadership_confidence", "LOW"),
+        help="Confidence in the leadership calculation, not confidence in the trade.",
+    )
+
+    st.markdown("#### Relative momentum change")
+    old_rs20 = row.get("rs20_10d_ago_pct")
+    new_rs20 = row.get("rs_vs_spy_20_pct")
+    change_pp = row.get("rs20_change_10d_pp")
+
+    if pd.notna(old_rs20) and pd.notna(new_rs20) and pd.notna(change_pp):
+        if change_pp >= 1.0:
+            momentum_state = "ACCELERATING"
+        elif change_pp <= -1.0:
+            momentum_state = "DECELERATING"
+        else:
+            momentum_state = "STABLE"
+
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric("RS20 • 10 sessions ago", f"{old_rs20:+.1f}%")
+        a2.metric("RS20 • now", f"{new_rs20:+.1f}%")
+        a3.metric("10-session change", f"{change_pp:+.1f}pp")
+        a4.metric("Momentum state", momentum_state)
+
+        st.caption(
+            f"Interpretation: 20-day relative performance versus SPY moved "
+            f"from {old_rs20:+.1f}% to {new_rs20:+.1f}% over the latest "
+            f"10 trading sessions ({change_pp:+.1f} percentage points)."
+        )
+    else:
+        st.caption("Insufficient aligned data for the 10-session RS20 comparison.")
+
+    st.markdown("#### Market-stress resilience")
+    stress_days = int(row.get("stress_day_count", 0) or 0)
+    stress_wins = int(row.get("stress_win_count", 0) or 0)
+    stress_rate = row.get("stress_outperform_pct")
+    stress_excess = row.get("stress_excess_mean_pct")
+    capture_pct = row.get("downside_capture_pct")
+    capture_label = row.get("downside_capture_label", "N/A")
+
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("SPY stress sessions", f"{stress_days}")
+    s2.metric(
+        "Beat SPY on stress days",
+        f"{stress_wins}/{stress_days} ({stress_rate:.0f}%)"
+        if stress_days and pd.notna(stress_rate)
+        else "—",
+    )
+    s3.metric(
+        "Avg excess return vs SPY",
+        f"{stress_excess:+.2f}%"
+        if pd.notna(stress_excess)
+        else "—",
+    )
+    s4.metric(
+        "Downside capture",
+        f"{capture_pct:.0f}% — {capture_label}"
+        if pd.notna(capture_pct)
+        else "—",
+    )
+
+    if pd.notna(capture_pct):
+        st.caption(
+            f"Downside-capture interpretation: on the selected SPY stress "
+            f"sessions, this stock lost about {capture_pct / 100.0:.2f}× "
+            f"as much as SPY in aggregate. Below 100% means better downside "
+            f"resilience than SPY; above 100% means worse."
+        )
+
+    st.markdown("#### Relative-strength line")
+    rs_index = row.get("rs_line_index")
+    rs_gap = row.get("rs_line_high_gap_pct")
+    r1, r2 = st.columns(2)
+    r1.metric(
+        "RS-line index vs 100D peak",
+        f"{rs_index:.1f}/100"
+        if pd.notna(rs_index)
+        else "—",
+        help="100 means the stock/SPY relative-strength line is at its 100-day peak.",
+    )
+    r2.metric(
+        "Distance below 100D RS peak",
+        f"{abs(rs_gap):.1f}%"
+        if pd.notna(rs_gap)
+        else "—",
+    )
+    if pd.notna(rs_index) and pd.notna(rs_gap):
+        st.caption(
+            f"Interpretation: the stock/SPY relative-strength line is currently "
+            f"{rs_index:.1f}/100, which is {abs(rs_gap):.1f}% below its best "
+            f"relative level of the last 100 trading sessions."
+        )
+
+    st.write(
+        f'**Leadership strengths:** '
+        f'{row.get("leadership_reasons", "") or "—"}'
+    )
+    if row.get("leadership_risks"):
+        st.warning("Leadership watch-outs: " + str(row["leadership_risks"]))
+
+    st.caption(
+        f'Stress mode: {row.get("stress_mode", "—")} • '
+        "THRESHOLD means genuine SPY ≤ -1% sessions were available. "
+        "Shadow-mode score still does not alter candidate classification."
+    )
+
+render_fundamental_quality(
+    sel,
+    expanded=True,
+    key_prefix="candidate_fund",
+)
+
+if row["chase_reasons"]:
+    st.warning("Anti-chase gate: " + row["chase_reasons"])
+
+if row["event_confidence"] == "UNKNOWN":
+    st.warning(
+        "Event Data Confidence: UNKNOWN. Verify earnings/event timing before any action."
+    )
+
+p1, p2, p3, p4 = st.columns(4)
+p1.metric("Entry ref", f'${row["entry_px"]:.2f}')
+p2.metric("Stop", f'${row["stop"]:.2f}')
+p3.metric("T1", f'${row["t1"]:.2f}')
+p4.metric("T2", f'${row["t2"]:.2f}')
+
+st.plotly_chart(chart(symbol_bars, sel), use_container_width=True)
+
+st.caption(
+    f'Latest/snapshot feed: {client.creds.feed.upper()} • '
+    f'Historical feed: {client.creds.historical_feed.upper()} (≥20m delayed) • '
+    f'Scan UTC: {res["ts"].strftime("%Y-%m-%d %H:%M:%S")} • '
+    'Paper orders disabled. Scanner output is research, not execution.'
+)
