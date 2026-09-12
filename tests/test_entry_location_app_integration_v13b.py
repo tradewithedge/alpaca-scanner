@@ -18,15 +18,22 @@ class V13bAppIntegrationTests(unittest.TestCase):
     def test_app_syntax_parses(self):
         self.assertIsInstance(self.tree, ast.Module)
 
-    def test_version_is_v13b(self):
-        self.assertIn('APP_VERSION = "V1.3b"', self.source)
+    def test_v13b_entry_location_layer_survives_later_app_versions(self):
+        # V1.3b is a frozen architecture regression test, not a permanent lock
+        # on the top-level app version. Later phases must retain the 3H layer.
+        self.assertIn('st.subheader("3H) Entry Location & Anti-Chase — Shadow Diagnostics")', self.source)
+        self.assertIn("render_entry_location_diagnostics(res)", self.source)
 
     def test_entry_location_module_is_imported_and_hot_reloaded(self):
         self.assertIn(
             "import scanner.entry_location as entry_location_module",
             self.source,
         )
-        self.assertIn("    entry_location_module,\n    regime_module,", self.source)
+        self.assertIn("    entry_location_module,\n", self.source)
+        self.assertLess(
+            self.source.find("    entry_location_module,\n"),
+            self.source.find("    regime_module,\n"),
+        )
 
     def test_builder_and_summary_are_bound(self):
         self.assertIn(
