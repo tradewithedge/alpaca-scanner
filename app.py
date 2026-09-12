@@ -26,6 +26,7 @@ import scanner.composite_architecture as composite_architecture_module
 import scanner.leadership as leadership_module
 import scanner.volume_quality as volume_quality_module
 import scanner.entry_location as entry_location_module
+import scanner.entry_zone as entry_zone_module
 import scanner.regime as regime_module
 import scanner.scoring as scoring_module
 import scanner.universe as universe_module
@@ -44,6 +45,7 @@ for _module in (
     leadership_module,
     volume_quality_module,
     entry_location_module,
+    entry_zone_module,
     regime_module,
     scoring_module,
     universe_module,
@@ -103,6 +105,8 @@ build_contextual_volume_quality = volume_quality_module.build_contextual_volume_
 summarize_contextual_volume_quality = volume_quality_module.summarize_contextual_volume_quality
 build_entry_location_diagnostics = entry_location_module.build_entry_location_diagnostics
 summarize_entry_location_diagnostics = entry_location_module.summarize_entry_location_diagnostics
+build_entry_zone_diagnostics = entry_zone_module.build_entry_zone_diagnostics
+summarize_entry_zone_diagnostics = entry_zone_module.summarize_entry_zone_diagnostics
 aggregate_regime = regime_module.aggregate_regime
 with_breadth = regime_module.with_breadth
 build_cross_section = scoring_module.build_cross_section
@@ -115,7 +119,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.3b"
+APP_VERSION = "V1.3c"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -125,13 +129,13 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • V1.3a Contextual Volume frozen SHADOW baseline • V1.3b Entry Location / Anti-Chase"
+    "• Trade With Edge • V1.3a Volume + V1.3b Entry Location frozen SHADOW baselines • V1.3c Trigger / Entry Zone"
 )
 st.caption(
-    "Roadmap stage: V1.3b Entry Location & Anti-Chase Foundation • SHADOW ONLY • "
-    "continuous extension pressure is measured against the existing frozen hard NO CHASE ceilings "
-    "(EMA8 / EMA20 / ATR) • V1.3a remains frozen • no change to official Candidate Quality, "
-    "F15 Composite, Entry Quality, ranking, buckets, event gates or trade decisions"
+    "Roadmap stage: V1.3c Trigger & Entry-Zone Architecture • SHADOW ONLY • "
+    "current price is separated from prior-structure trigger, planned entry zone and maximum acceptable fill • "
+    "V1.3a and V1.3b remain frozen • no change to official Candidate Quality, F15 Composite, Entry Quality, "
+    "legacy entry_px, stops/targets, ranking, buckets, event gates or trade decisions"
 )
 
 
@@ -1646,6 +1650,185 @@ def render_entry_location_diagnostics(scan):
         )
 
 
+
+def render_entry_zone_diagnostics(scan):
+    """Render V1.3c Trigger / Entry-Zone architecture diagnostics, shadow only."""
+    st.subheader("3I) Trigger & Entry Zone — Shadow Diagnostics")
+    st.info(
+        "V1.3c SHADOW MODE: current price is no longer treated as the only practical entry reference. "
+        "This section separates prior-structure trigger, confirmation condition, planned entry zone and "
+        "maximum acceptable fill. It does NOT change official Entry Quality, legacy entry_px, stop/T1/T2, "
+        "Candidate Quality, F15 Composite, ranking, buckets, event gates or trade decisions."
+    )
+
+    table = scan.get("entry_zone_shadow")
+    summary = scan.get("entry_zone_shadow_summary") or {}
+    official_ok = bool(scan.get("entry_zone_official_integrity_pass", False))
+    structure_ok = bool(scan.get("entry_zone_structure_parity_pass", False))
+
+    if official_ok:
+        st.success(
+            "V1.3c OFFICIAL-LAYER INTEGRITY PASS: official scored values, dtypes and row/column "
+            "structure were unchanged while Trigger / Entry-Zone diagnostics were built."
+        )
+    else:
+        st.error(
+            "V1.3c OFFICIAL-LAYER INTEGRITY FAIL: official scanner output changed during shadow "
+            "Trigger / Entry-Zone construction. Do not use this run for acceptance."
+        )
+
+    if structure_ok:
+        st.success(
+            "V1.3c PRIOR-20 STRUCTURE PARITY PASS: independently reconstructed prior-20-session "
+            "highs agree with the frozen official high20_prev reference wherever both are available."
+        )
+    else:
+        st.error(
+            "V1.3c PRIOR-20 STRUCTURE PARITY FAIL: at least one reconstructed prior-20-session "
+            "high disagrees with the frozen high20_prev reference. Investigate before acceptance."
+        )
+
+    shadow_error = scan.get("entry_zone_shadow_error")
+    if shadow_error:
+        st.error(
+            "V1.3c Trigger / Entry-Zone construction failed safely. The frozen official scanner "
+            f"remains available and unchanged. Details: {shadow_error}"
+        )
+
+    if table is None or table.empty:
+        st.warning("No usable V1.3c Trigger / Entry-Zone diagnostics are available for this run.")
+        return
+
+    evaluated = int(summary.get("evaluated", len(table)))
+    high_conf = int(summary.get("high_confidence", 0))
+    structured = int(summary.get("structured_plans", 0))
+    waiting = int(summary.get("waiting_for_trigger", 0))
+    in_zone = int(summary.get("in_entry_zone", 0))
+    late = int(summary.get("above_zone_late", 0))
+    missed = int(summary.get("missed_no_chase", 0))
+    blocked = int(summary.get("trigger_blocked", 0))
+    no_plan = int(summary.get("no_structured_plan", 0))
+    not_ranked = int(summary.get("not_ranked", 0))
+    entry_ref_matches = int(summary.get("official_entry_ref_current_matches", 0))
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Candidates evaluated", f"{evaluated:,}")
+    m2.metric("HIGH Plan Data Confidence", f"{high_conf:,}/{evaluated:,}")
+    m3.metric("Structured trigger plans", f"{structured:,}")
+    m4.metric("Waiting for trigger", f"{waiting:,}")
+
+    m5, m6, m7, m8 = st.columns(4)
+    m5.metric("Triggered • in entry zone", f"{in_zone:,}")
+    m6.metric("Triggered • above zone / late", f"{late:,}")
+    m7.metric("Missed / NO CHASE", f"{missed:,}")
+    m8.metric("Trigger blocked by hard ceiling", f"{blocked:,}")
+
+    st.caption(
+        f"No structured plan: {no_plan:,} • NOT RANKED: {not_ranked:,} • "
+        f"Frozen official entry_px still matches the current close for {entry_ref_matches:,}/{evaluated:,} rows. "
+        "V1.3c measures the alternative planning architecture without rewriting that frozen field."
+    )
+    st.caption(
+        "Reference mechanics are deliberately transparent and provisional: structural triggers use prior daily-bar highs; "
+        "the preferred entry zone extends 0.25 ATR above trigger; the raw maximum fill extends 0.50 ATR above trigger; "
+        "maximum fill is then capped by the most restrictive existing frozen EMA8 / EMA20 / ATR hard NO CHASE ceiling."
+    )
+    st.caption(
+        "These zone-width/fill parameters are research references, not proven production thresholds. "
+        "If a structural trigger itself lies beyond a frozen hard ceiling, V1.3c BLOCKS the plan instead of moving the ceiling."
+    )
+
+    display_cols = [
+        "symbol",
+        "official_bucket",
+        "official_setup",
+        "official_candidate_quality",
+        "official_entry_quality",
+        "official_entry_px",
+        "current_price",
+        "trigger_type",
+        "trigger_price",
+        "confirmation_condition",
+        "entry_zone_low",
+        "entry_zone_high",
+        "max_acceptable_fill",
+        "trigger_distance_pct",
+        "max_fill_headroom_pct",
+        "frozen_hard_ceiling_px",
+        "trigger_to_hard_ceiling_atr",
+        "plan_state",
+        "trigger_beyond_hard_ceiling",
+        "high20_structure_parity",
+        "plan_data_confidence",
+        "plan_notes",
+    ]
+
+    def _display_entry_zone_frame(source):
+        out = source[[c for c in display_cols if c in source.columns]].copy()
+        for col in [
+            "official_candidate_quality",
+            "official_entry_quality",
+            "official_entry_px",
+            "current_price",
+            "trigger_price",
+            "entry_zone_low",
+            "entry_zone_high",
+            "max_acceptable_fill",
+            "trigger_distance_pct",
+            "max_fill_headroom_pct",
+            "frozen_hard_ceiling_px",
+            "trigger_to_hard_ceiling_atr",
+        ]:
+            if col in out.columns:
+                out[col] = pd.to_numeric(out[col], errors="coerce").round(2)
+        return out
+
+    waiting_table = table[table["plan_state"].astype(str) == "WAITING FOR TRIGGER"].copy()
+    if not waiting_table.empty:
+        waiting_table["_distance"] = pd.to_numeric(
+            waiting_table["trigger_distance_pct"], errors="coerce"
+        )
+        waiting_table = waiting_table.sort_values("_distance", ascending=True).drop(columns="_distance")
+        st.markdown("**Conditional plans — waiting for structural trigger**")
+        st.dataframe(
+            _display_entry_zone_frame(waiting_table).head(40),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    active_states = [
+        "TRIGGERED — IN ENTRY ZONE",
+        "TRIGGERED — ABOVE ZONE / LATE",
+        "MISSED / NO CHASE — ABOVE MAX FILL",
+        "BLOCKED — TRIGGER BEYOND HARD CEILING",
+    ]
+    active = table[table["plan_state"].astype(str).isin(active_states)].copy()
+    if not active.empty:
+        st.markdown("**Triggered / late / blocked plans — shadow execution map**")
+        st.dataframe(
+            _display_entry_zone_frame(active).head(40),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    full_export = _display_entry_zone_frame(table)
+    st.download_button(
+        "Download FULL V1.3c Trigger / Entry-Zone diagnostic CSV",
+        data=full_export.to_csv(index=False).encode("utf-8"),
+        file_name="v13c_trigger_entry_zone_full_diagnostic.csv",
+        mime="text/csv",
+        key="download_v13c_trigger_entry_zone_full",
+    )
+
+    with st.expander("V1.3c full Trigger / Entry-Zone diagnostic audit", expanded=False):
+        st.dataframe(full_export, use_container_width=True, hide_index=True)
+        st.caption(
+            "Breakout plans use the prior-20-session high; EMA20 pullbacks use an EMA20/prior-session-high reclaim; "
+            "VCP/tight-base plans use the prior-10-session structure high; MA20 repair uses a reclaim plan. "
+            "TRENDING / NO CLEAN SETUP and BROKEN / BELOW MA50 receive NO STRUCTURED PLAN rather than an invented trigger."
+        )
+
+
 def _symbol_key(symbol):
     """Canonical comparison key for external index/ETF vs Alpaca tickers."""
     return "".join(ch for ch in str(symbol).upper().strip() if ch.isalnum())
@@ -2763,6 +2946,35 @@ if run:
         and entry_location_shadow_summary.get("hard_ceiling_parity_mismatches", 0) == 0
     )
 
+    # V1.3c Trigger & Entry-Zone Architecture — SHADOW ONLY. The frozen official
+    # scanner still carries entry_px=current close. V1.3c builds a separate
+    # setup-aware structural trigger / zone / max-fill map from prior daily-bar
+    # structure and caps it by the EXISTING frozen hard anti-chase ceilings.
+    _scored_before_entry_zone_shadow = scored.copy(deep=True)
+    entry_zone_shadow_error = None
+    try:
+        entry_zone_shadow = build_entry_zone_diagnostics(
+            scored,
+            bars,
+            max_ext_ema8_pct=cfg.max_ext_ema8_pct,
+            max_ext_ema20_pct=cfg.max_ext_ema20_pct,
+            max_ext_atr=cfg.max_ext_atr,
+        )
+        entry_zone_shadow_summary = summarize_entry_zone_diagnostics(entry_zone_shadow)
+    except Exception as exc:
+        entry_zone_shadow = pd.DataFrame()
+        entry_zone_shadow_summary = summarize_entry_zone_diagnostics(entry_zone_shadow)
+        entry_zone_shadow_error = str(exc)
+    entry_zone_official_integrity_pass = scored.equals(_scored_before_entry_zone_shadow)
+    entry_zone_structure_parity_pass = bool(
+        entry_zone_shadow_error is None
+        and entry_zone_shadow is not None
+        and not entry_zone_shadow.empty
+        and entry_zone_shadow_summary.get("high20_structure_parity_checked", 0) > 0
+        and entry_zone_shadow_summary.get("high20_structure_parity_mismatches", 0) == 0
+    )
+
+
     bucket_audit = bucket_integrity(scored)
     starting_count = universe_member_count or liquidity_audit["matched_count"]
 
@@ -2799,6 +3011,11 @@ if run:
         "entry_location_official_integrity_pass": entry_location_official_integrity_pass,
         "entry_location_hard_ceiling_parity_pass": entry_location_hard_ceiling_parity_pass,
         "entry_location_shadow_error": entry_location_shadow_error,
+        "entry_zone_shadow": entry_zone_shadow,
+        "entry_zone_shadow_summary": entry_zone_shadow_summary,
+        "entry_zone_official_integrity_pass": entry_zone_official_integrity_pass,
+        "entry_zone_structure_parity_pass": entry_zone_structure_parity_pass,
+        "entry_zone_shadow_error": entry_zone_shadow_error,
         "rejected": rejected,
         "universe_name": universe_name,
         "reference_signature": reference_signature(
@@ -3724,6 +3941,9 @@ render_contextual_volume_quality(res)
 
 st.divider()
 render_entry_location_diagnostics(res)
+
+st.divider()
+render_entry_zone_diagnostics(res)
 
 # -----------------------------------------------------------------------------
 # 4) Candidate accounting and buckets
