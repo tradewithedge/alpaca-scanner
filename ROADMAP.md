@@ -1,10 +1,10 @@
 # ALPACA Scanner Project Charter & Roadmap
 
-**Revision:** Rev.6 - V1.3d Risk/Reward Shadow Opening  
+**Revision:** Rev.7 - V1.3d Risk/Reward Shadow Acceptance  
 **Prepared:** 11 September 2026  
-**Current accepted/frozen development checkpoint:** V1.3c - Trigger & Entry-Zone Architecture (SHADOW)  
+**Current accepted/frozen development checkpoint:** V1.3d - Risk/Reward & Stop-Distance Diagnostics (SHADOW)  
 **Official decision-layer authority:** unchanged by V1.3c; Candidate Quality, F15 Composite, official Entry Quality, ranking, buckets, event gates and trade decisions remain on the pre-V1.3b official path  
-**Current development stage:** V1.3d - Risk/Reward & Stop-Distance Diagnostics (SHADOW)
+**Current development stage:** V1.3e - READY / WATCH / WAIT / NO CHASE Decision Architecture
 
 ## North Star
 
@@ -72,8 +72,8 @@ No unresolved item may remain only in conversational memory.
 | **V1.3a** | **Contextual Volume Quality Diagnostics** | **ACCEPTED / FROZEN (SHADOW) - 11 Sep 2026** |
 | **V1.3b** | **Entry Location & Anti-Chase Foundation** | **ACCEPTED / FROZEN (SHADOW) - 11 Sep 2026** |
 | **V1.3c** | **Trigger & Entry-Zone Architecture** | **ACCEPTED / FROZEN (SHADOW) - 13 Sep 2026** |
-| **V1.3d** | **Risk/Reward & Stop-Distance Diagnostics** | **IN DEVELOPMENT / SHADOW** |
-| V1.3e | READY / WATCH / WAIT / NO CHASE Decision Architecture | Planned |
+| **V1.3d** | **Risk/Reward & Stop-Distance Diagnostics** | **ACCEPTED / FROZEN (SHADOW) - 13 Sep 2026** |
+| **V1.3e** | **READY / WATCH / WAIT / NO CHASE Decision Architecture** | **NEXT** |
 | V1.3f | Shadow Execution-Capture Logging / staged-execution preparation | Planned |
 | V1.4 | Market Regime & Deployment Engine | Planned |
 | V1.5 | Earnings / Event Reliability Layer | Planned |

@@ -846,10 +846,10 @@ For defects/process gaps, use:
 **symptom -> root cause -> corrective action -> prevention rule**.
 
 
-## V1.3d Opening Record - Risk/Reward & Stop-Distance Shadow Diagnostics
+## V1.3d Acceptance Record - Risk/Reward & Stop-Distance Shadow Diagnostics
 
 **Date:** 13 September 2026
-**Status:** IN DEVELOPMENT / SHADOW
+**Status:** ACCEPTED / FROZEN (SHADOW)
 **Dependency:** V1.3c Trigger & Entry-Zone Architecture accepted/frozen shadow
 
 ### Problem / trigger
