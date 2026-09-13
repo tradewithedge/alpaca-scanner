@@ -1,10 +1,10 @@
 # ALPACA Scanner Project Charter & Roadmap
 
-**Revision:** Rev.4 - V1.3b Freeze / V1.3c Opening  
+**Revision:** Rev.5 - V1.3c Freeze / V1.3d Opening  
 **Prepared:** 11 September 2026  
-**Current accepted/frozen development checkpoint:** V1.3b - Entry Location & Anti-Chase Foundation (SHADOW)  
-**Official decision-layer authority:** unchanged by V1.3b; Candidate Quality, F15 Composite, official Entry Quality, ranking, buckets, event gates and trade decisions remain on the pre-V1.3b official path  
-**Next development stage:** V1.3c - Trigger & Entry-Zone Architecture
+**Current accepted/frozen development checkpoint:** V1.3c - Trigger & Entry-Zone Architecture (SHADOW)  
+**Official decision-layer authority:** unchanged by V1.3c; Candidate Quality, F15 Composite, official Entry Quality, ranking, buckets, event gates and trade decisions remain on the pre-V1.3b official path  
+**Next development stage:** V1.3d - Risk/Reward & Stop-Distance Gate
 
 ## North Star
 
@@ -71,8 +71,8 @@ No unresolved item may remain only in conversational memory.
 | **V1.3** | **Entry Quality / Anti-Chase Engine** | **CURRENT** |
 | **V1.3a** | **Contextual Volume Quality Diagnostics** | **ACCEPTED / FROZEN (SHADOW) - 11 Sep 2026** |
 | **V1.3b** | **Entry Location & Anti-Chase Foundation** | **ACCEPTED / FROZEN (SHADOW) - 11 Sep 2026** |
-| **V1.3c** | **Trigger & Entry-Zone Architecture** | **NEXT / DESIGN** |
-| V1.3d | Risk/Reward & Stop-Distance Gate | Planned |
+| **V1.3c** | **Trigger & Entry-Zone Architecture** | **ACCEPTED / FROZEN (SHADOW) - 13 Sep 2026** |
+| **V1.3d** | **Risk/Reward & Stop-Distance Gate** | **NEXT / DESIGN** |
 | V1.3e | READY / WATCH / WAIT / NO CHASE Decision Architecture | Planned |
 | V1.3f | Shadow Execution-Capture Logging / staged-execution preparation | Planned |
 | V1.4 | Market Regime & Deployment Engine | Planned |
@@ -279,6 +279,110 @@ V1.3b is frozen as a **SHADOW entry-location architecture**. Acceptance proves m
 
 Outcome value and threshold calibration remain dependencies of **V1.7 Expectancy Validation / Backtest / Forward-Test Lab**.
 
+## V1.3c - Final Freeze Record: Trigger & Entry-Zone Architecture
+
+**Status:** **ACCEPTED / FROZEN (SHADOW) - 13 Sep 2026**  
+**ADR:** `docs/architecture/ADR-004-trigger-entry-zone-v13c.md`
+
+### Problem addressed
+
+The frozen scanner still used the current close as the practical `entry_px` reference. That is useful as a snapshot, but it does not define an executable plan for a trader who must wait for a structural trigger and avoid chasing after the move.
+
+V1.3c therefore separates:
+
+- observed current price;
+- structural trigger;
+- confirmation condition;
+- preferred entry zone;
+- maximum acceptable fill;
+- frozen hard NO CHASE boundary.
+
+### Frozen V1.3c shadow architecture
+
+V1.3c is a separate planning layer. It does **not** rewrite the frozen official `entry_px`, stop, T1, T2, Candidate Quality, F15 Composite, Entry Quality, ranking, buckets, event gates or trade decisions.
+
+Reference trigger logic is setup-aware:
+
+- **Breakout:** prior-20-session structure high + small confirmation buffer;
+- **EMA20 Pullback:** EMA20 / prior-session-high reclaim structure;
+- **VCP / Tight Base:** prior-10-session structure high;
+- **MA20 Repair:** reclaim structure is diagnostic, not an automatic actionability decision;
+- **No clean setup / Broken:** no invented structured plan.
+
+The preferred entry zone extends **0.25 ATR** above the structural trigger. The raw maximum acceptable fill extends **0.50 ATR** above the trigger, then is capped by the frozen V1.3b hard NO CHASE ceiling. These values are **research references only**, not proven production thresholds.
+
+If the structural trigger itself is beyond the frozen hard ceiling, V1.3c **BLOCKS** the plan rather than moving the ceiling.
+
+### State model
+
+The shadow state vocabulary is:
+
+- **WAITING FOR TRIGGER**;
+- **TRIGGERED - IN ENTRY ZONE**;
+- **TRIGGERED - ABOVE ZONE / LATE**;
+- **MISSED / NO CHASE - ABOVE MAX FILL**;
+- **BLOCKED - TRIGGER BEYOND HARD CEILING**;
+- **NO STRUCTURED PLAN**.
+
+The state model is descriptive. It is not a production decision gate.
+
+### Live machine-readable acceptance - S&P 500 / STRICT
+
+Full Swing Candidates and full V1.3c Trigger/Entry-Zone Diagnostic CSVs were reconciled:
+
+- official candidates: **116**;
+- diagnostic rows: **116**;
+- exact symbol population match: **116/116**;
+- duplicate symbols: **0** in both files;
+- official bucket/setup/CQ/EQ/legacy `entry_px` mismatches: **0/116**;
+- current-price equality: **115/116 exact; 116/116 within $0.01 export rounding**;
+- Plan Data Confidence: **116/116 HIGH**;
+- prior-20 structure parity: **116/116 PASS**;
+- state reconciliation: **116/116**;
+- states: **63 WAITING / 12 IN ENTRY ZONE / 4 ABOVE ZONE-LATE / 2 MISSED-NO CHASE / 7 BLOCKED / 28 NO STRUCTURED PLAN**.
+
+Representative states included AAPL/TMO/MSFT/COIN in the preferred entry zone; IQV/T/PFG/NTRS above the preferred zone but still below the maximum fill; HPQ/TRV beyond maximum fill and correctly marked MISSED/NO CHASE.
+
+### Live machine-readable acceptance - Russell 2000 (IWM proxy) / STRICT
+
+- official candidates: **90**;
+- diagnostic rows: **90**;
+- exact symbol population match: **90/90**;
+- duplicate symbols: **0** in both files;
+- official bucket/setup/CQ/EQ/legacy `entry_px` mismatches: **0/90**;
+- current-price equality: **90/90**;
+- Plan Data Confidence: **90/90 HIGH**;
+- prior-20 structure parity: **90/90 PASS**;
+- state reconciliation: **90/90**;
+- states: **42 WAITING / 2 IN ENTRY ZONE / 2 ABOVE ZONE-LATE / 1 MISSED-NO CHASE / 11 BLOCKED / 32 NO STRUCTURED PLAN**.
+
+Representative states included URBN/CNXC in the preferred entry zone, DAN/EWTX above the preferred zone but not beyond maximum fill, and HOG correctly marked MISSED/NO CHASE.
+
+### Cross-universe acceptance conclusion
+
+S&P 500 and Russell 2000 both passed the architecture/integrity requirements. The independent trigger/zone layer preserves the frozen official decision path while producing a practical execution map. The architecture is therefore **ACCEPTED / FROZEN (SHADOW)**.
+
+### Acceptance boundary
+
+This freeze proves:
+
+- separation of current price from planned entry;
+- independent prior-20 structural reconstruction;
+- setup-aware trigger planning;
+- preferred entry-zone and maximum-fill calculation;
+- hard-ceiling blocking without ceiling relaxation;
+- official-layer isolation;
+- machine-readable cross-universe reconciliation.
+
+It does **not** prove:
+
+- that 0.25 ATR is the optimal entry-zone width;
+- that 0.50 ATR is the optimal maximum-fill width;
+- that any V1.3c state has positive expectancy;
+- that V1.3c should modify official Entry Quality or production buckets.
+
+Those questions remain assigned to **V1.7 Expectancy Validation / Backtest / Forward-Test Lab**.
+
 ## Validation Evidence Standard
 
 Effective with the V1.3a freeze and reinforced by V1.3b:
@@ -363,8 +467,8 @@ V1.7 should evaluate conditional expectancy by setup, Candidate Quality, Entry Q
 | R-001 | Contextual Volume Quality diagnostics architecture | **RESOLVED / FROZEN SHADOW** | **V1.3a** | Architecture accepted; outcome value/threshold calibration deferred to V1.7 evidence |
 | R-002 | Candidate-vs-Entry feature separation | ASSIGNED | V1.3b-V1.3e | Preserve separate truth layers |
 | R-003 | Entry location / EMA8-EMA20 extension curve | **RESOLVED / FROZEN SHADOW** | **V1.3b** | Continuous pressure/headroom accepted; production thresholds/expectancy deferred to V1.7 |
-| R-004 | Trigger / entry-zone architecture | **ASSIGNED** | **V1.3c** | Current close must not be the only entry assumption |
-| R-005 | Stop-distance / available-R gate | ASSIGNED | V1.3d | Prospective R:R before actionability |
+| R-004 | Trigger / entry-zone architecture | **RESOLVED / FROZEN SHADOW** | **V1.3c** | Trigger/zone/max-fill architecture accepted; parameter expectancy deferred to V1.7 |
+| R-005 | Stop-distance / available-R gate | **ASSIGNED** | **V1.3d** | Prospective R:R before actionability |
 | R-006 | Staged execution A/B/C | DEFERRED / PREP | V1.3f -> V1.6/V1.8 | Shadow logging first; fixed total portfolio risk |
 | R-007 | Signal Capture Rate / Missed Opportunity R | ASSIGNED | V1.3f -> V1.7 | Start logging before formal lab; diagnostics underneath expectancy |
 | R-008 | Earnings/event-date reliability | ASSIGNED | V1.5 | UNKNOWN != safe; separate confidence layer |
@@ -383,7 +487,7 @@ V1.7 should evaluate conditional expectancy by setup, Candidate Quality, Entry Q
 - Scanner auditability: `████████████████████` 100%
 - Candidate intelligence: `████████████████████` 100% architecture-complete through frozen V1.2.3c; F15 still shadow-only
 - Fundamental-performance intelligence: `██████████████████░░` 90%
-- Entry intelligence: `████████████░░░░░░░░` 60% - V1.3a and V1.3b accepted; V1.3c next
+- Entry intelligence: `███████████████░░░░░` 75% - V1.3a/V1.3b/V1.3c shadow architecture accepted; V1.3d next
 - Contextual Volume Quality diagnostics: `████████████████████` 100% - shadow architecture accepted; production scoring/expectancy deliberately unproven
 - Entry Location / Anti-Chase diagnostics: `████████████████████` 100% - shadow architecture accepted; production use/expectancy deliberately unproven
 - Event-date confidence: `██░░░░░░░░░░░░░░░░░░` 10%
@@ -394,4 +498,4 @@ The percentages describe implementation maturity, not expected trading performan
 
 ## Development Order From Here
 
-**V1.3a frozen -> V1.3b frozen -> V1.3c Trigger/Zone -> V1.3d R:R -> V1.3e Decision UX -> V1.3f Shadow execution capture -> V1.4 Regime -> V1.5 Events -> V1.6 Risk -> V1.7 Expectancy Validation / Backtest / Forward Test -> V1.8 Paper -> V2.0.**
+**V1.3a frozen -> V1.3b frozen -> V1.3c Trigger/Zone frozen -> V1.3d R:R -> V1.3e Decision UX -> V1.3f Shadow execution capture -> V1.4 Regime -> V1.5 Events -> V1.6 Risk -> V1.7 Expectancy Validation / Backtest / Forward Test -> V1.8 Paper -> V2.0.**
