@@ -1,10 +1,10 @@
 # ALPACA Scanner Project Charter & Roadmap
 
-**Revision:** Rev.5 - V1.3c Freeze / V1.3d Opening  
+**Revision:** Rev.6 - V1.3d Risk/Reward Shadow Opening  
 **Prepared:** 11 September 2026  
 **Current accepted/frozen development checkpoint:** V1.3c - Trigger & Entry-Zone Architecture (SHADOW)  
 **Official decision-layer authority:** unchanged by V1.3c; Candidate Quality, F15 Composite, official Entry Quality, ranking, buckets, event gates and trade decisions remain on the pre-V1.3b official path  
-**Next development stage:** V1.3d - Risk/Reward & Stop-Distance Gate
+**Current development stage:** V1.3d - Risk/Reward & Stop-Distance Diagnostics (SHADOW)
 
 ## North Star
 
@@ -72,7 +72,7 @@ No unresolved item may remain only in conversational memory.
 | **V1.3a** | **Contextual Volume Quality Diagnostics** | **ACCEPTED / FROZEN (SHADOW) - 11 Sep 2026** |
 | **V1.3b** | **Entry Location & Anti-Chase Foundation** | **ACCEPTED / FROZEN (SHADOW) - 11 Sep 2026** |
 | **V1.3c** | **Trigger & Entry-Zone Architecture** | **ACCEPTED / FROZEN (SHADOW) - 13 Sep 2026** |
-| **V1.3d** | **Risk/Reward & Stop-Distance Gate** | **NEXT / DESIGN** |
+| **V1.3d** | **Risk/Reward & Stop-Distance Diagnostics** | **IN DEVELOPMENT / SHADOW** |
 | V1.3e | READY / WATCH / WAIT / NO CHASE Decision Architecture | Planned |
 | V1.3f | Shadow Execution-Capture Logging / staged-execution preparation | Planned |
 | V1.4 | Market Regime & Deployment Engine | Planned |
@@ -499,3 +499,61 @@ The percentages describe implementation maturity, not expected trading performan
 ## Development Order From Here
 
 **V1.3a frozen -> V1.3b frozen -> V1.3c Trigger/Zone frozen -> V1.3d R:R -> V1.3e Decision UX -> V1.3f Shadow execution capture -> V1.4 Regime -> V1.5 Events -> V1.6 Risk -> V1.7 Expectancy Validation / Backtest / Forward Test -> V1.8 Paper -> V2.0.**
+
+
+## V1.3d - Risk/Reward & Stop-Distance Shadow Opening
+
+### Objective
+V1.3d adds a transparent risk-geometry layer after the frozen V1.3c trigger/entry-zone architecture. It answers: **if the structural trigger occurs, where is the structural stop, how much R is available, and how quickly does R:R deteriorate as the fill moves through the entry zone?**
+
+### Frozen dependencies
+- V1.2.3c F15 architecture remains frozen.
+- V1.3a contextual volume remains shadow/frozen.
+- V1.3b Entry Location / Anti-Chase remains shadow/frozen.
+- V1.3c Trigger / Entry Zone remains shadow/frozen.
+- V1.3d must never rewrite official `entry_px`, `stop`, `t1`, `t2`, Entry Quality, Candidate Quality, ranking, buckets, event gates or trade decisions.
+
+### Shadow architecture
+V1.3d consumes V1.3c `trigger_price`, `entry_zone_high` and `max_acceptable_fill`. It derives a structural support reference from available EMA20 / prior-10 low / prior-20 low, then places a provisional stop 0.25 ATR below that support. It calculates T1 at 1.5R and T2 at 2.5R from the trigger reference.
+
+R:R is calculated separately at:
+1. trigger price;
+2. preferred entry-zone high;
+3. maximum acceptable fill.
+
+Research bands:
+- STRONG: >= 2.0R
+- ACCEPTABLE: 1.5R to <2.0R
+- WEAK: 1.0R to <1.5R
+- POOR: <1.0R
+- NOT RANKED: missing/invalid critical inputs
+
+These bands and the 0.25 ATR stop buffer are **research references only**. They are not production gates and are not expectancy-proven.
+
+### Why this design
+A single R:R number at the current close hides execution deterioration. The same setup can be attractive at the structural trigger but unattractive at the high end of the preferred zone or maximum fill. V1.3d therefore exposes the full geometry rather than manufacturing a binary pass/fail.
+
+### Non-negotiable safety rules
+1. Good R:R cannot rescue broken/poor price structure.
+2. A blocked or missed/no-chase V1.3c plan remains non-entry diagnostic state.
+3. No neutral/average imputation for missing risk inputs.
+4. No target/stop adjustment solely to manufacture a desired R multiple.
+5. Official-layer integrity must be checked with a deep-copy equality invariant.
+6. Outcome validation belongs to Backtest + Forward Test + Expectancy work, not this shadow phase.
+
+### Acceptance criteria for V1.3d
+- Application compiles.
+- Shadow module has no dependency on official scoring logic.
+- Official `scored` frame is unchanged after shadow construction.
+- V1.3c diagnostic rows remain the sole planning input for trigger/zone/max-fill.
+- Structural stop is transparent and strictly below planned entry references when ranked.
+- R:R is separately available at trigger, zone high and max fill.
+- Missing/invalid risk data is NOT RANKED, never imputed.
+- UI explicitly labels the layer SHADOW and preserves the official decision layer.
+- Existing V1.3b/V1.3c focused tests remain passing.
+
+### Current validation status
+Local focused validation completed for the V1.3d implementation: **80 tests PASS** across V1.3b/V1.3c/V1.3d focused suites. This is not a claim of the complete historical repository regression suite. Live universe validation is still pending.
+
+### Research boundary
+V1.3d does not prove that 2R is the correct threshold, that 1.5R/2.5R are optimal targets, or that 0.25 ATR is the correct stop buffer. These parameters must later be tested across historical and prospective samples. The central outcome metric remains **expectancy**, with Backtest and Forward-Test evidence.

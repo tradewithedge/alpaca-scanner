@@ -27,6 +27,7 @@ import scanner.leadership as leadership_module
 import scanner.volume_quality as volume_quality_module
 import scanner.entry_location as entry_location_module
 import scanner.entry_zone as entry_zone_module
+import scanner.risk_reward as risk_reward_module
 import scanner.regime as regime_module
 import scanner.scoring as scoring_module
 import scanner.universe as universe_module
@@ -46,6 +47,7 @@ for _module in (
     volume_quality_module,
     entry_location_module,
     entry_zone_module,
+    risk_reward_module,
     regime_module,
     scoring_module,
     universe_module,
@@ -107,6 +109,8 @@ build_entry_location_diagnostics = entry_location_module.build_entry_location_di
 summarize_entry_location_diagnostics = entry_location_module.summarize_entry_location_diagnostics
 build_entry_zone_diagnostics = entry_zone_module.build_entry_zone_diagnostics
 summarize_entry_zone_diagnostics = entry_zone_module.summarize_entry_zone_diagnostics
+build_risk_reward_diagnostics = risk_reward_module.build_risk_reward_diagnostics
+summarize_risk_reward_diagnostics = risk_reward_module.summarize_risk_reward_diagnostics
 aggregate_regime = regime_module.aggregate_regime
 with_breadth = regime_module.with_breadth
 build_cross_section = scoring_module.build_cross_section
@@ -119,7 +123,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.3c"
+APP_VERSION = "V1.3d"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -129,7 +133,7 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • V1.3a Volume + V1.3b Entry Location frozen SHADOW baselines • V1.3c Trigger / Entry Zone"
+    "• Trade With Edge • V1.3a Volume + V1.3b Entry Location + V1.3c Trigger / Entry Zone frozen SHADOW baselines • V1.3d Risk / Reward"
 )
 st.caption(
     "Roadmap stage: V1.3c Trigger & Entry-Zone Architecture • SHADOW ONLY • "
@@ -1651,6 +1655,95 @@ def render_entry_location_diagnostics(scan):
 
 
 
+def render_risk_reward_diagnostics(scan):
+    """Render V1.3d Risk/Reward & Stop-Distance shadow diagnostics."""
+    rr = scan.get("risk_reward_shadow")
+    summary = scan.get("risk_reward_shadow_summary") or {}
+    error = scan.get("risk_reward_shadow_error")
+
+    st.subheader("3J) Risk / Reward & Stop-Distance — Shadow Diagnostics")
+    st.info(
+        "V1.3d SHADOW MODE: planned entry references come from the frozen V1.3c "
+        "trigger/zone architecture. V1.3d maps structural stop, risk, T1/T2 and "
+        "R-multiple geometry without changing official Entry Quality, legacy "
+        "entry_px/stop/T1/T2, Candidate Quality, F15 Composite, ranking, buckets, "
+        "event gates or trade decisions. R:R bands are research references only."
+    )
+
+    if error:
+        st.error(
+            "V1.3d SHADOW CONSTRUCTION ERROR — official scanner preserved. "
+            f"Diagnostic error: {error}"
+        )
+        return
+
+    if scan.get("risk_reward_official_integrity_pass"):
+        st.success(
+            "V1.3d OFFICIAL-LAYER INTEGRITY PASS: official scored values, dtypes and "
+            "row/column structure were unchanged while Risk/Reward diagnostics were built."
+        )
+    else:
+        st.error("V1.3d OFFICIAL-LAYER INTEGRITY FAIL — stop and investigate before use.")
+        return
+
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("Candidates evaluated", summary.get("evaluated", 0))
+    c2.metric("HIGH Plan Confidence", f'{summary.get("high_confidence", 0)}/{summary.get("evaluated", 0)}')
+    c3.metric("Structured risk plans", summary.get("structured", 0))
+    c4.metric("R:R ≥ 2.0R @ trigger", summary.get("strong_trigger_rr", 0))
+    d1,d2,d3,d4 = st.columns(4)
+    d1.metric("ACCEPTABLE 1.5–<2.0R", summary.get("acceptable_trigger_rr", 0))
+    d2.metric("WEAK 1.0–<1.5R", summary.get("weak_trigger_rr", 0))
+    d3.metric("POOR <1.0R", summary.get("poor_trigger_rr", 0))
+    d4.metric("Invalid / NOT RANKED", summary.get("not_ranked", 0))
+
+    st.caption(
+        "V1.3d uses structural support + 0.25 ATR as the shadow stop reference and "
+        "1.5R / 2.5R target references, matching the frozen legacy target multiples. "
+        "Trigger, preferred-zone-high and maximum-fill R are all shown separately."
+    )
+    st.caption(
+        "R:R bands are research labels, not production gates. A strong R:R number "
+        "cannot rescue weak price structure, a blocked/no-chase plan, or poor data. "
+        "Expectancy must be proven later with Backtest + Forward Test evidence."
+    )
+
+    if rr is None or rr.empty:
+        st.warning("No V1.3d rows available.")
+        return
+
+    strong = rr[rr["trigger_rr_band"] == "STRONG"]
+    if not strong.empty:
+        st.markdown("#### Strong trigger geometry — shadow evidence")
+        st.dataframe(
+            strong[[
+                "symbol","official_bucket","official_setup","plan_state",
+                "trigger_price","stop_price","trigger_risk",
+                "t1_price","t2_price","trigger_rr","zone_high_rr","max_fill_rr",
+                "stop_distance_pct","stop_distance_atr","trigger_rr_band"
+            ]].head(25),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    weak = rr[rr["trigger_rr_band"].isin(["WEAK","POOR"])]
+    if not weak.empty:
+        st.markdown("#### Risk / reward conflict watch — good setup does not manufacture edge")
+        st.dataframe(
+            weak[[
+                "symbol","official_bucket","official_setup","plan_state",
+                "trigger_price","stop_price","trigger_risk",
+                "trigger_rr","zone_high_rr","max_fill_rr",
+                "stop_distance_pct","stop_distance_atr","trigger_rr_band"
+            ]].head(25),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with st.expander("Full V1.3d Risk / Reward diagnostic table", expanded=False):
+        st.dataframe(rr, use_container_width=True, hide_index=True)
+
+
 def render_entry_zone_diagnostics(scan):
     """Render V1.3c Trigger / Entry-Zone architecture diagnostics, shadow only."""
     st.subheader("3I) Trigger & Entry Zone — Shadow Diagnostics")
@@ -2974,6 +3067,31 @@ if run:
         and entry_zone_shadow_summary.get("high20_structure_parity_mismatches", 0) == 0
     )
 
+    # V1.3d Risk/Reward & Stop-Distance — SHADOW ONLY. Uses the V1.3c planned
+    # trigger/zone/max-fill architecture plus structural support and ATR to map
+    # risk and R-multiple geometry. It never rewrites the frozen official trade
+    # plan or turns R:R into a production gate.
+    _scored_before_risk_reward_shadow = scored.copy(deep=True)
+    risk_reward_shadow_error = None
+    try:
+        risk_reward_shadow = build_risk_reward_diagnostics(
+            scored,
+            bars,
+            entry_zone=entry_zone_shadow,
+        )
+        risk_reward_shadow_summary = summarize_risk_reward_diagnostics(
+            risk_reward_shadow
+        )
+    except Exception as exc:
+        risk_reward_shadow = pd.DataFrame()
+        risk_reward_shadow_summary = summarize_risk_reward_diagnostics(
+            risk_reward_shadow
+        )
+        risk_reward_shadow_error = str(exc)
+    risk_reward_official_integrity_pass = scored.equals(
+        _scored_before_risk_reward_shadow
+    )
+
 
     bucket_audit = bucket_integrity(scored)
     starting_count = universe_member_count or liquidity_audit["matched_count"]
@@ -3016,6 +3134,10 @@ if run:
         "entry_zone_official_integrity_pass": entry_zone_official_integrity_pass,
         "entry_zone_structure_parity_pass": entry_zone_structure_parity_pass,
         "entry_zone_shadow_error": entry_zone_shadow_error,
+        "risk_reward_shadow": risk_reward_shadow,
+        "risk_reward_shadow_summary": risk_reward_shadow_summary,
+        "risk_reward_official_integrity_pass": risk_reward_official_integrity_pass,
+        "risk_reward_shadow_error": risk_reward_shadow_error,
         "rejected": rejected,
         "universe_name": universe_name,
         "reference_signature": reference_signature(
@@ -3944,6 +4066,9 @@ render_entry_location_diagnostics(res)
 
 st.divider()
 render_entry_zone_diagnostics(res)
+
+st.divider()
+render_risk_reward_diagnostics(res)
 
 # -----------------------------------------------------------------------------
 # 4) Candidate accounting and buckets

@@ -844,3 +844,31 @@ Every future major phase record must include:
 For defects/process gaps, use:
 
 **symptom -> root cause -> corrective action -> prevention rule**.
+
+
+## V1.3d Opening Record - Risk/Reward & Stop-Distance Shadow Diagnostics
+
+**Date:** 13 September 2026
+**Status:** IN DEVELOPMENT / SHADOW
+**Dependency:** V1.3c Trigger & Entry-Zone Architecture accepted/frozen shadow
+
+### Problem / trigger
+V1.3c can define a structural trigger, preferred entry zone and maximum acceptable fill, but it does not yet show how the downside risk and available R change across those entry references. A single current-price R:R can therefore hide execution deterioration.
+
+### Architecture
+V1.3d adds a separate risk-geometry table. It consumes V1.3c planning fields and derives a transparent structural support reference from EMA20 and prior daily lows. A provisional 0.25 ATR stop buffer is applied below support. T1/T2 use 1.5R/2.5R shadow references. R:R is evaluated independently at trigger, zone high and max fill.
+
+### What does not change
+Official Candidate Quality, F15 Composite, Entry Quality, ranking, buckets, event gates, legacy `entry_px`, legacy `stop`, legacy `t1`, legacy `t2` and trade decisions remain untouched. The app checks `scored.equals(copy_before_shadow)` after the shadow build.
+
+### Acceptance philosophy
+The layer is diagnostic, not a new production gate. R:R bands are descriptive research labels. No missing risk input is imputed. Good R:R cannot rescue poor price structure, blocked/no-chase plans, or weak data.
+
+### Test evidence
+The focused V1.3b/V1.3c/V1.3d suites completed with **80/80 PASS** locally. The complete historical repository regression suite was not run in the isolated build workspace and is therefore not claimed.
+
+### Research dependency
+The 0.25 ATR stop buffer, 1.5R/2.5R target references and 2.0R STRONG band remain provisional. Their production authority requires Backtest + Forward Test + Expectancy evidence. Expectancy remains the central KPI; Signal Capture Rate and Missed Opportunity R are subordinate diagnostics.
+
+### Prevention rule
+**Never manufacture a trade by tightening the stop or moving the target until a desired R:R appears.** Risk geometry must describe the trade that structure actually permits.
