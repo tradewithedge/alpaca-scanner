@@ -25,9 +25,13 @@ DECISION_COLUMNS = [
     "decision_state",
     "decision_reason",
     "decision_ready",
+    "trade_quality_state",
+    "trade_quality_eligible",
 ]
 
-READY = "READY"
+EXECUTION_READY = "EXECUTION READY"
+# Backward-compatible internal alias; UI/export semantics now use EXECUTION READY.
+READY = EXECUTION_READY
 WATCH = "WATCH"
 WAIT = "WAIT"
 NO_CHASE = "NO CHASE"
@@ -81,7 +85,7 @@ def _decision_for_row(row: pd.Series) -> tuple[str, str, bool]:
 
     if plan_state == "TRIGGERED — IN ENTRY ZONE":
         if _finite(max_rr) and float(max_rr) >= 1.5:
-            return READY, "Current price is inside the preferred entry zone and risk geometry remains acceptable through max fill.", True
+            return EXECUTION_READY, "Current price is inside the preferred entry zone and risk geometry remains acceptable through max fill.", True
         return WAIT, "Current price is in the zone, but risk geometry does not remain acceptable through max fill.", False
 
     if plan_state == "WAITING FOR TRIGGER":
@@ -136,6 +140,9 @@ def build_decision_architecture(
             "risk_geometry_state": q.get("risk_geometry_state", "NOT RANKED"),
         })
         state, reason, ready = _decision_for_row(merged)
+        official_bucket = str(r.get("bucket", "")).strip()
+        trade_quality_eligible = official_bucket.startswith("A-QUALITY") or official_bucket.startswith("A+")
+        trade_quality_state = "TRADE-QUALITY ELIGIBLE" if trade_quality_eligible else "NOT TRADE-QUALITY ELIGIBLE"
         rows.append({
             "symbol": symbol,
             "official_bucket": r.get("bucket"),
@@ -156,6 +163,8 @@ def build_decision_architecture(
             "decision_state": state,
             "decision_reason": reason,
             "decision_ready": ready,
+            "trade_quality_state": trade_quality_state,
+            "trade_quality_eligible": trade_quality_eligible,
         })
 
     return pd.DataFrame(rows, columns=DECISION_COLUMNS)
@@ -179,4 +188,6 @@ def summarize_decision_architecture(table: pd.DataFrame) -> dict:
         "wait": int((states == WAIT).sum()),
         "no_chase": int((states == NO_CHASE).sum()),
         "decision_ready": int(table["decision_ready"].fillna(False).astype(bool).sum()),
+        "trade_quality_eligible": int(table.get("trade_quality_eligible", pd.Series(False, index=table.index)).fillna(False).astype(bool).sum()),
+        "execution_ready_not_trade_quality": int(((states == EXECUTION_READY) & ~table.get("trade_quality_eligible", pd.Series(False, index=table.index)).fillna(False).astype(bool)).sum()),
     }
