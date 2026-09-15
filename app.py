@@ -140,7 +140,7 @@ st.caption(
     "• Trade With Edge • V1.3a Volume + V1.3b Entry Location + V1.3c Trigger / Entry Zone frozen SHADOW baselines • V1.3d Risk / Reward + V1.3e Decision Architecture"
 )
 st.caption(
-    "Roadmap stage: V1.3c Trigger & Entry-Zone Architecture • SHADOW ONLY • "
+    "Roadmap stage: V1.3e Decision Architecture • SHADOW ONLY • "
     "current price is separated from prior-structure trigger, planned entry zone and maximum acceptable fill • "
     "V1.3a and V1.3b remain frozen • no change to official Candidate Quality, F15 Composite, Entry Quality, "
     "legacy entry_px, stops/targets, ranking, buckets, event gates or trade decisions"
@@ -1749,14 +1749,14 @@ def render_risk_reward_diagnostics(scan):
 
 
 def render_decision_architecture_diagnostics(scan):
-    """Render V1.3e READY/WATCH/WAIT/NO CHASE shadow decision architecture."""
+    """Render V1.3e EXECUTION READY/WATCH/WAIT/NO CHASE shadow decision architecture."""
     table = scan.get("decision_shadow")
     summary = scan.get("decision_shadow_summary") or {}
     error = scan.get("decision_shadow_error")
 
-    st.subheader("3K) READY / WATCH / WAIT / NO CHASE — Shadow Decision Architecture")
+    st.subheader("3K) EXECUTION READY / WATCH / WAIT / NO CHASE — Shadow Decision Architecture")
     st.info(
-        "V1.3e SHADOW MODE: decision UX only. READY/WATCH/WAIT/NO CHASE is derived "
+        "V1.3e SHADOW MODE: decision UX only. EXECUTION READY/WATCH/WAIT/NO CHASE is derived "
         "from the frozen V1.3c trigger/zone state and V1.3d risk geometry. It does "
         "NOT replace official trade decisions, Candidate Quality, Entry Quality, "
         "ranking, buckets, event gates or legacy trade-plan fields."
@@ -1779,13 +1779,13 @@ def render_decision_architecture_diagnostics(scan):
         return
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("READY", summary.get("ready", 0))
+    c1.metric("EXECUTION READY", summary.get("ready", 0))
     c2.metric("WATCH", summary.get("watch", 0))
     c3.metric("WAIT", summary.get("wait", 0))
     c4.metric("NO CHASE", summary.get("no_chase", 0))
 
     st.caption(
-        "READY is reserved for a structured high-confidence plan currently inside the "
+        "EXECUTION READY is reserved for a structured high-confidence plan currently inside the "
         "preferred entry zone with acceptable max-fill geometry. WATCH means the plan is "
         "valid but still waiting for trigger. WAIT covers incomplete/marginal/non-actionable "
         "states. NO CHASE preserves V1.3c late/blocked boundaries. These are shadow labels, "
@@ -1800,7 +1800,7 @@ def render_decision_architecture_diagnostics(scan):
         "symbol", "official_bucket", "official_setup", "official_candidate_quality",
         "official_entry_quality", "official_decision", "plan_state", "current_price",
         "trigger_price", "entry_zone_low", "entry_zone_high", "max_acceptable_fill",
-        "max_fill_rr", "decision_state", "decision_reason",
+        "max_fill_rr", "decision_state", "decision_reason", "trade_quality_state",
     ]
     st.dataframe(table[display_cols].head(50), use_container_width=True, hide_index=True)
 

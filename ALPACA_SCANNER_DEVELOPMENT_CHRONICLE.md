@@ -788,6 +788,19 @@ Conditional expectancy should be evaluated by relevant system state to discover 
 
 ---
 
+
+## V1.3e Live Reconciliation Refinement Record — 15 September 2026
+
+**Status:** IN DEVELOPMENT / SHADOW — refinement required before freeze
+
+Live machine-readable diagnostics were collected from the deployed V1.3e scanner for S&P 500 (114 candidates) and Russell 2000 (88 candidates). Decision-state totals reconciled to the deployed UI: S&P 500 = 10 READY / 36 WATCH / 38 WAIT / 30 NO CHASE; Russell 2000 = 2 READY / 34 WATCH / 38 WAIT / 14 NO CHASE.
+
+The architecture and official-layer integrity checks passed. The key semantic finding was that one S&P 500 `DEVELOPING` candidate (MO, Candidate Quality 77.3) met the frozen V1.3c/V1.3d execution conditions and therefore received the V1.3e READY state. This is logically consistent with the shadow rule, but the label can be misread as Trade With Edge trade approval.
+
+**Corrective action:** user-facing READY is refined to **EXECUTION READY**. The shadow output also records `trade_quality_state` and `trade_quality_eligible` from the unchanged official bucket. No production scoring, ranking, bucket, event gate, official decision, Candidate Quality, Entry Quality, or trade-plan field is changed. The refinement is a semantic/diagnostic guardrail, not a new production gate.
+
+**Prevention rule:** never allow an execution-state label to imply official trade-quality approval. Execution readiness and Trade With Edge quality eligibility must remain visibly separate.
+
 # 13. Version Ledger
 
 | Version | Theme | Status |
