@@ -29,6 +29,7 @@ import scanner.entry_location as entry_location_module
 import scanner.entry_zone as entry_zone_module
 import scanner.risk_reward as risk_reward_module
 import scanner.decision_architecture as decision_architecture_module
+import scanner.execution_capture as execution_capture_module
 import scanner.regime as regime_module
 import scanner.scoring as scoring_module
 import scanner.universe as universe_module
@@ -50,6 +51,7 @@ for _module in (
     entry_zone_module,
     risk_reward_module,
     decision_architecture_module,
+    execution_capture_module,
     regime_module,
     scoring_module,
     universe_module,
@@ -115,6 +117,9 @@ build_risk_reward_diagnostics = risk_reward_module.build_risk_reward_diagnostics
 summarize_risk_reward_diagnostics = risk_reward_module.summarize_risk_reward_diagnostics
 build_decision_architecture = decision_architecture_module.build_decision_architecture
 summarize_decision_architecture = decision_architecture_module.summarize_decision_architecture
+build_execution_capture_log = execution_capture_module.build_execution_capture_log
+append_execution_capture = execution_capture_module.append_execution_capture
+summarize_execution_capture = execution_capture_module.summarize_execution_capture
 aggregate_regime = regime_module.aggregate_regime
 with_breadth = regime_module.with_breadth
 build_cross_section = scoring_module.build_cross_section
@@ -127,7 +132,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.3e"
+APP_VERSION = "V1.3f"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -137,12 +142,12 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • V1.3a Volume + V1.3b Entry Location + V1.3c Trigger / Entry Zone frozen SHADOW baselines • V1.3d Risk / Reward + V1.3e Decision Architecture"
+    "• Trade With Edge • V1.3a Volume + V1.3b Entry Location + V1.3c Trigger / Entry Zone + V1.3d Risk / Reward + V1.3e Decision Architecture frozen SHADOW baselines • V1.3f Execution Capture"
 )
 st.caption(
-    "Roadmap stage: V1.3e Decision Architecture • SHADOW ONLY • "
+    "Roadmap stage: V1.3f Shadow Execution Capture • SHADOW ONLY • "
     "current price is separated from prior-structure trigger, planned entry zone and maximum acceptable fill • "
-    "V1.3a and V1.3b remain frozen • no change to official Candidate Quality, F15 Composite, Entry Quality, "
+    "V1.3a-V1.3e remain frozen • no change to official Candidate Quality, F15 Composite, Entry Quality, "
     "legacy entry_px, stops/targets, ranking, buckets, event gates or trade decisions"
 )
 
@@ -1816,6 +1821,82 @@ def render_decision_architecture_diagnostics(scan):
     )
 
 
+
+def render_execution_capture_diagnostics(scan):
+    """Render V1.3f prospective execution-capture logging, shadow only."""
+    st.subheader("3L) Shadow Execution Capture & Staged-Execution Preparation")
+    st.info(
+        "V1.3f SHADOW MODE: records what the scanner knew at signal time so later outcome analysis "
+        "can distinguish signal quality from execution capture. It does NOT place orders, read broker "
+        "fills, change official decisions, or create production position sizing rules. The 30/30/40 "
+        "A/B/C tranche labels are research-preparation references only."
+    )
+
+    decision = scan.get("decision_shadow")
+    if decision is None or decision.empty:
+        st.warning("No V1.3e decision rows available for V1.3f capture.")
+        return
+
+    if not scan.get("decision_official_integrity_pass", False):
+        st.error("V1.3f blocked: V1.3e official-layer integrity did not pass.")
+        return
+
+    ts = scan.get("ts")
+    if ts is None:
+        ts = datetime.now(timezone.utc)
+    batch_id = f"{ts.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{str(scan.get('universe_name','UNIVERSE')).replace(' ','_')}"
+
+    snapshot = build_execution_capture_log(
+        decision,
+        universe=str(scan.get("universe_name", "")),
+        signal_timestamp_utc=ts,
+        capture_batch_id=batch_id,
+    )
+
+    if "v13f_capture_log" not in st.session_state:
+        st.session_state.v13f_capture_log = pd.DataFrame()
+
+    existing = st.session_state.v13f_capture_log
+    summary = summarize_execution_capture(existing)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("CAPTURED ROWS", summary["rows"])
+    c2.metric("QUALITY-ELIGIBLE", summary["eligible"])
+    c3.metric("EXECUTION READY", summary["execution_ready"])
+    c4.metric("OUTCOME RECORDED", summary["outcome_recorded"])
+
+    st.caption(
+        f"Current scan: {len(snapshot):,} signal rows. A/B/C preparation = 30% Starter / 30% Add / "
+        "40% Full Trigger as shadow references only. Outcome fields remain blank until independently recorded."
+    )
+
+    if st.button("Capture this scan into V1.3f Forward-Test Log", key="capture_v13f_scan"):
+        st.session_state.v13f_capture_log = append_execution_capture(existing, snapshot)
+        st.success(
+            f"Captured {len(snapshot):,} rows prospectively. Duplicate capture IDs are ignored; "
+            "no broker/execution action was performed."
+        )
+        summary = summarize_execution_capture(st.session_state.v13f_capture_log)
+
+    log = st.session_state.v13f_capture_log
+    if log is not None and not log.empty:
+        show_cols = [
+            "signal_timestamp_utc", "universe", "symbol", "official_bucket",
+            "trade_quality_state", "decision_state", "plan_state",
+            "current_price_at_capture", "trigger_price", "entry_zone_low",
+            "entry_zone_high", "max_acceptable_fill", "max_fill_rr",
+            "stage_a_status", "stage_b_status", "stage_c_status", "fill_status",
+        ]
+        st.dataframe(log[show_cols].tail(100), use_container_width=True, hide_index=True)
+        st.download_button(
+            "Download V1.3f Forward-Test Capture Log CSV",
+            data=log.to_csv(index=False).encode("utf-8"),
+            file_name="v13f_forward_test_capture_log.csv",
+            mime="text/csv",
+            key="download_v13f_forward_test_capture_log",
+        )
+    else:
+        st.caption("No scan has been captured yet. Capture is manual and prospective by design.")
+
 def render_entry_zone_diagnostics(scan):
     """Render V1.3c Trigger / Entry-Zone architecture diagnostics, shadow only."""
     st.subheader("3I) Trigger & Entry Zone — Shadow Diagnostics")
@@ -3184,6 +3265,10 @@ if run:
         _scored_before_decision_shadow
     )
 
+    # V1.3f capture is constructed only when requested by the UI; this scan-level
+    # snapshot is the prospective source for the manual forward-test capture button.
+    # It never mutates scored or performs any execution action.
+
 
     bucket_audit = bucket_integrity(scored)
     starting_count = universe_member_count or liquidity_audit["matched_count"]
@@ -4168,6 +4253,9 @@ render_risk_reward_diagnostics(res)
 
 st.divider()
 render_decision_architecture_diagnostics(res)
+
+st.divider()
+render_execution_capture_diagnostics(res)
 
 # -----------------------------------------------------------------------------
 # 4) Candidate accounting and buckets

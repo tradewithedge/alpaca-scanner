@@ -487,7 +487,7 @@ V1.7 should evaluate conditional expectancy by setup, Candidate Quality, Entry Q
 - Scanner auditability: `████████████████████` 100%
 - Candidate intelligence: `████████████████████` 100% architecture-complete through frozen V1.2.3c; F15 still shadow-only
 - Fundamental-performance intelligence: `██████████████████░░` 90%
-- Entry intelligence: `█████████████████░░░` 85% - V1.3a/V1.3b/V1.3c/V1.3d/V1.3e frozen shadow; V1.3f capture foundation planned
+- Entry intelligence: `█████████████████░░░` 85% - V1.3a/V1.3b/V1.3c/V1.3d/V1.3e frozen shadow; V1.3f capture foundation in development
 - Contextual Volume Quality diagnostics: `████████████████████` 100% - shadow architecture accepted; production scoring/expectancy deliberately unproven
 - Entry Location / Anti-Chase diagnostics: `████████████████████` 100% - shadow architecture accepted; production use/expectancy deliberately unproven
 - Event-date confidence: `██░░░░░░░░░░░░░░░░░░` 10%
@@ -520,7 +520,7 @@ V1.3e acceptance requires application compilation, focused unit/integration test
 
 ## Development Order From Here
 
-**V1.3a frozen -> V1.3b frozen -> V1.3c Trigger/Zone frozen -> V1.3d R:R -> V1.3e Decision UX frozen -> V1.3f Shadow execution capture (next planned stage) -> V1.4 Regime -> V1.5 Events -> V1.6 Risk -> V1.7 Expectancy Validation / Backtest / Forward Test -> V1.8 Paper -> V2.0.**
+**V1.3a frozen -> V1.3b frozen -> V1.3c Trigger/Zone frozen -> V1.3d R:R -> V1.3e Decision UX frozen -> V1.3f Shadow execution capture -> V1.4 Regime -> V1.5 Events -> V1.6 Risk -> V1.7 Expectancy Validation / Backtest / Forward Test -> V1.8 Paper -> V2.0.**
 
 
 
@@ -549,7 +549,7 @@ The key semantic acceptance case was MO: it may satisfy execution architecture c
 
 ### Next permitted development move
 
-V1.3f remains **PLANNED / NOT YET OPENED**. It may begin only after this freeze checkpoint is recorded as accepted.
+V1.3f is now **OPEN / IN DEVELOPMENT (SHADOW)** after the formal V1.3e freeze checkpoint was verified on GitHub.
 
 ## V1.3f - Shadow Execution-Capture Logging / Staged-Execution Preparation
 

@@ -888,3 +888,21 @@ The key refinement case was preserved: four S&P EXECUTION READY names were A-qua
 **Disposition:** V1.3e accepted/frozen as SHADOW.
 
 **Freeze disposition:** V1.3e is **ACCEPTED / FROZEN (SHADOW)**. V1.3f remains **PLANNED** and is not opened by this freeze record. The previously prepared V1.3f package is held pending the user's explicit approval after the V1.3e baseline is frozen.
+
+
+## 2026-09-16 — V1.3f Shadow Execution Capture Opened
+
+### Opening decision
+V1.3e is formally **ACCEPTED / FROZEN (SHADOW)** on GitHub main. V1.3f is therefore opened as the next development stage, with no change to the frozen V1.3e official decision layer.
+
+### V1.3f implementation scope
+The implementation adds a separate `scanner/execution_capture.py` module and a manual Streamlit capture workflow. Each capture records the signal state observable at scan time, including official quality fields, Entry Quality, setup, V1.3e decision state, V1.3c trigger/zone/max-fill references and V1.3d max-fill R:R. Outcome fields remain explicitly `UNRECORDED` until independently observed.
+
+The CF Case Study #001 lesson is carried forward as execution architecture: A/B/C staged preparation uses **30% Starter / 30% Add / 40% Full Trigger** as shadow references only. A non-trade-quality-eligible candidate cannot receive an active staged plan. No broker order, fill endpoint, portfolio mutation or inferred outcome is introduced.
+
+### Validation record
+Offline focused validation: **31/31 PASS** across the V1.3e focused tests plus V1.3f module/integration tests. `py_compile` PASS.
+
+Live deployed smoke test and successful prospective S&P 500 + Russell 2000 capture/download remain required before V1.3f can be accepted/frozen.
+
+**Current status:** V1.3f **IN DEVELOPMENT / SHADOW**.
