@@ -1,10 +1,10 @@
 # ALPACA Scanner Project Charter & Roadmap
 
-**Revision:** Rev.7 - V1.3d Risk/Reward Shadow Acceptance  
+**Revision:** Rev.8 - V1.3e Decision Architecture Shadow Development  
 **Prepared:** 11 September 2026  
 **Current accepted/frozen development checkpoint:** V1.3d - Risk/Reward & Stop-Distance Diagnostics (SHADOW)  
 **Official decision-layer authority:** unchanged by V1.3c; Candidate Quality, F15 Composite, official Entry Quality, ranking, buckets, event gates and trade decisions remain on the pre-V1.3b official path  
-**Current development stage:** V1.3e - READY / WATCH / WAIT / NO CHASE Decision Architecture
+**Current development stage:** V1.3e - READY / WATCH / WAIT / NO CHASE Decision Architecture (SHADOW)
 
 ## North Star
 
@@ -73,7 +73,7 @@ No unresolved item may remain only in conversational memory.
 | **V1.3b** | **Entry Location & Anti-Chase Foundation** | **ACCEPTED / FROZEN (SHADOW) - 11 Sep 2026** |
 | **V1.3c** | **Trigger & Entry-Zone Architecture** | **ACCEPTED / FROZEN (SHADOW) - 13 Sep 2026** |
 | **V1.3d** | **Risk/Reward & Stop-Distance Diagnostics** | **ACCEPTED / FROZEN (SHADOW) - 13 Sep 2026** |
-| **V1.3e** | **READY / WATCH / WAIT / NO CHASE Decision Architecture** | **NEXT** |
+| **V1.3e** | **READY / WATCH / WAIT / NO CHASE Decision Architecture** | **IN DEVELOPMENT / SHADOW** |
 | V1.3f | Shadow Execution-Capture Logging / staged-execution preparation | Planned |
 | V1.4 | Market Regime & Deployment Engine | Planned |
 | V1.5 | Earnings / Event Reliability Layer | Planned |
@@ -487,7 +487,7 @@ V1.7 should evaluate conditional expectancy by setup, Candidate Quality, Entry Q
 - Scanner auditability: `████████████████████` 100%
 - Candidate intelligence: `████████████████████` 100% architecture-complete through frozen V1.2.3c; F15 still shadow-only
 - Fundamental-performance intelligence: `██████████████████░░` 90%
-- Entry intelligence: `███████████████░░░░░` 75% - V1.3a/V1.3b/V1.3c shadow architecture accepted; V1.3d next
+- Entry intelligence: `████████████████░░░░` 80% - V1.3a/V1.3b/V1.3c/V1.3d frozen shadow; V1.3e decision architecture in shadow development
 - Contextual Volume Quality diagnostics: `████████████████████` 100% - shadow architecture accepted; production scoring/expectancy deliberately unproven
 - Entry Location / Anti-Chase diagnostics: `████████████████████` 100% - shadow architecture accepted; production use/expectancy deliberately unproven
 - Event-date confidence: `██░░░░░░░░░░░░░░░░░░` 10%
@@ -495,6 +495,28 @@ V1.7 should evaluate conditional expectancy by setup, Candidate Quality, Entry Q
 - Paper execution/journal: `░░░░░░░░░░░░░░░░░░░░` 0%
 
 The percentages describe implementation maturity, not expected trading performance.
+
+## V1.3e - READY / WATCH / WAIT / NO CHASE Decision Architecture
+
+### Objective
+V1.3e converts the frozen V1.3c entry-plan state and V1.3d risk geometry into a compact, decision-first shadow state: **READY / WATCH / WAIT / NO CHASE**. The purpose is to make scanner output operationally readable without weakening quality or changing the official trade-decision layer.
+
+### State definitions
+- **READY** — structured, HIGH-confidence V1.3c plan; current price is inside the preferred entry zone; max-fill R:R remains at or above the provisional 1.5R research floor.
+- **WATCH** — structured, HIGH-confidence plan is valid and price remains below the trigger; wait for trigger acceptance rather than anticipating.
+- **WAIT** — incomplete/non-structured plan, marginal risk geometry, or a state that does not meet the strict READY/WATCH definitions.
+- **NO CHASE** — V1.3c has already marked the setup late, missed above max fill, or blocked beyond the frozen anti-chase ceiling.
+
+### Non-negotiable rules
+1. V1.3e is **SHADOW ONLY**. It does not rewrite official `decision`, Candidate Quality, Entry Quality, ranking, buckets, event gates, `entry_px`, `stop`, `t1` or `t2`.
+2. READY cannot be produced from missing or low-confidence planning data.
+3. A late/blocked/no-chase V1.3c state can never be promoted to READY by V1.3e.
+4. V1.3e does not invent a new trigger, expand an entry zone, tighten a stop, or relax the anti-chase ceiling.
+5. The 1.5R max-fill criterion is a **provisional research floor**, not a proven production gate.
+6. Outcome authority remains Backtest + Forward Test + Expectancy work.
+
+### Acceptance target
+V1.3e is accepted only after application compilation, focused unit/integration tests, official-layer equality validation, and live-universe shadow reconciliation.
 
 ## Development Order From Here
 

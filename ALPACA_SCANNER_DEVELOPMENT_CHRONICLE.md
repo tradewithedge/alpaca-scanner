@@ -1,11 +1,12 @@
 # ALPACA Scanner - Development Chronicle & Architecture Record
 
-**Revision:** Rev.7  
+**Revision:** Rev.8  
 **Prepared:** 13 September 2026  
 **Current accepted implementation checkpoint:** V1.3d - Risk/Reward & Stop-Distance Diagnostics  
+**Current development checkpoint:** V1.3e - READY / WATCH / WAIT / NO CHASE Decision Architecture (SHADOW)  
 **V1.3d status:** **ACCEPTED / FROZEN (SHADOW)**  
 **Official decision-layer authority:** unchanged by V1.3d  
-**Next development checkpoint:** V1.3e - READY / WATCH / WAIT / NO CHASE Decision Architecture
+**Next development checkpoint:** V1.3f - Shadow Execution Capture / Signal Capture Logging
 
 > This is the authoritative living engineering-history record for the ALPACA Scanner. It preserves problems encountered, evidence observed, architecture selected, alternatives rejected, validation performed, frozen principles, open risks and the next permitted development move.
 

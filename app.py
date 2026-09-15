@@ -28,6 +28,7 @@ import scanner.volume_quality as volume_quality_module
 import scanner.entry_location as entry_location_module
 import scanner.entry_zone as entry_zone_module
 import scanner.risk_reward as risk_reward_module
+import scanner.decision_architecture as decision_architecture_module
 import scanner.regime as regime_module
 import scanner.scoring as scoring_module
 import scanner.universe as universe_module
@@ -48,6 +49,7 @@ for _module in (
     entry_location_module,
     entry_zone_module,
     risk_reward_module,
+    decision_architecture_module,
     regime_module,
     scoring_module,
     universe_module,
@@ -111,6 +113,8 @@ build_entry_zone_diagnostics = entry_zone_module.build_entry_zone_diagnostics
 summarize_entry_zone_diagnostics = entry_zone_module.summarize_entry_zone_diagnostics
 build_risk_reward_diagnostics = risk_reward_module.build_risk_reward_diagnostics
 summarize_risk_reward_diagnostics = risk_reward_module.summarize_risk_reward_diagnostics
+build_decision_architecture = decision_architecture_module.build_decision_architecture
+summarize_decision_architecture = decision_architecture_module.summarize_decision_architecture
 aggregate_regime = regime_module.aggregate_regime
 with_breadth = regime_module.with_breadth
 build_cross_section = scoring_module.build_cross_section
@@ -123,7 +127,7 @@ bucket_integrity = audit_module.bucket_integrity
 liquidity_summary = audit_module.liquidity_summary
 
 
-APP_VERSION = "V1.3d"
+APP_VERSION = "V1.3e"
 
 st.set_page_config(
     page_title=f"ALPACA Scanner {APP_VERSION}",
@@ -133,7 +137,7 @@ st.set_page_config(
 st.title(f"📈 ALPACA Scanner {APP_VERSION}")
 st.caption(
     "Regime-aware swing scanner • 15-min delayed SIP / consolidated historical SIP "
-    "• Trade With Edge • V1.3a Volume + V1.3b Entry Location + V1.3c Trigger / Entry Zone frozen SHADOW baselines • V1.3d Risk / Reward"
+    "• Trade With Edge • V1.3a Volume + V1.3b Entry Location + V1.3c Trigger / Entry Zone frozen SHADOW baselines • V1.3d Risk / Reward + V1.3e Decision Architecture"
 )
 st.caption(
     "Roadmap stage: V1.3c Trigger & Entry-Zone Architecture • SHADOW ONLY • "
@@ -1744,6 +1748,74 @@ def render_risk_reward_diagnostics(scan):
         st.dataframe(rr, use_container_width=True, hide_index=True)
 
 
+def render_decision_architecture_diagnostics(scan):
+    """Render V1.3e READY/WATCH/WAIT/NO CHASE shadow decision architecture."""
+    table = scan.get("decision_shadow")
+    summary = scan.get("decision_shadow_summary") or {}
+    error = scan.get("decision_shadow_error")
+
+    st.subheader("3K) READY / WATCH / WAIT / NO CHASE — Shadow Decision Architecture")
+    st.info(
+        "V1.3e SHADOW MODE: decision UX only. READY/WATCH/WAIT/NO CHASE is derived "
+        "from the frozen V1.3c trigger/zone state and V1.3d risk geometry. It does "
+        "NOT replace official trade decisions, Candidate Quality, Entry Quality, "
+        "ranking, buckets, event gates or legacy trade-plan fields."
+    )
+
+    if error:
+        st.error(
+            "V1.3e SHADOW CONSTRUCTION ERROR — official scanner preserved. "
+            f"Diagnostic error: {error}"
+        )
+        return
+
+    if scan.get("decision_official_integrity_pass"):
+        st.success(
+            "V1.3e OFFICIAL-LAYER INTEGRITY PASS: official scored values were unchanged "
+            "while the decision-state layer was constructed."
+        )
+    else:
+        st.error("V1.3e OFFICIAL-LAYER INTEGRITY FAIL — stop and investigate before use.")
+        return
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("READY", summary.get("ready", 0))
+    c2.metric("WATCH", summary.get("watch", 0))
+    c3.metric("WAIT", summary.get("wait", 0))
+    c4.metric("NO CHASE", summary.get("no_chase", 0))
+
+    st.caption(
+        "READY is reserved for a structured high-confidence plan currently inside the "
+        "preferred entry zone with acceptable max-fill geometry. WATCH means the plan is "
+        "valid but still waiting for trigger. WAIT covers incomplete/marginal/non-actionable "
+        "states. NO CHASE preserves V1.3c late/blocked boundaries. These are shadow labels, "
+        "not production gates."
+    )
+
+    if table is None or table.empty:
+        st.warning("No V1.3e decision rows available.")
+        return
+
+    display_cols = [
+        "symbol", "official_bucket", "official_setup", "official_candidate_quality",
+        "official_entry_quality", "official_decision", "plan_state", "current_price",
+        "trigger_price", "entry_zone_low", "entry_zone_high", "max_acceptable_fill",
+        "max_fill_rr", "decision_state", "decision_reason",
+    ]
+    st.dataframe(table[display_cols].head(50), use_container_width=True, hide_index=True)
+
+    with st.expander("Full V1.3e decision-state diagnostic", expanded=False):
+        st.dataframe(table, use_container_width=True, hide_index=True)
+
+    st.download_button(
+        "Download FULL V1.3e decision architecture CSV",
+        data=table.to_csv(index=False).encode("utf-8"),
+        file_name="v13e_decision_architecture_full_diagnostic.csv",
+        mime="text/csv",
+        key="download_v13e_decision_architecture_full",
+    )
+
+
 def render_entry_zone_diagnostics(scan):
     """Render V1.3c Trigger / Entry-Zone architecture diagnostics, shadow only."""
     st.subheader("3I) Trigger & Entry Zone — Shadow Diagnostics")
@@ -3092,6 +3164,26 @@ if run:
         _scored_before_risk_reward_shadow
     )
 
+    # V1.3e READY / WATCH / WAIT / NO CHASE — SHADOW ONLY. This is a decision
+    # UX layer over frozen V1.3c planning + V1.3d risk geometry. It never
+    # rewrites the official decision layer.
+    _scored_before_decision_shadow = scored.copy(deep=True)
+    decision_shadow_error = None
+    try:
+        decision_shadow = build_decision_architecture(
+            scored,
+            entry_zone=entry_zone_shadow,
+            risk_reward=risk_reward_shadow,
+        )
+        decision_shadow_summary = summarize_decision_architecture(decision_shadow)
+    except Exception as exc:
+        decision_shadow = pd.DataFrame()
+        decision_shadow_summary = summarize_decision_architecture(decision_shadow)
+        decision_shadow_error = str(exc)
+    decision_official_integrity_pass = scored.equals(
+        _scored_before_decision_shadow
+    )
+
 
     bucket_audit = bucket_integrity(scored)
     starting_count = universe_member_count or liquidity_audit["matched_count"]
@@ -3138,6 +3230,10 @@ if run:
         "risk_reward_shadow_summary": risk_reward_shadow_summary,
         "risk_reward_official_integrity_pass": risk_reward_official_integrity_pass,
         "risk_reward_shadow_error": risk_reward_shadow_error,
+        "decision_shadow": decision_shadow,
+        "decision_shadow_summary": decision_shadow_summary,
+        "decision_official_integrity_pass": decision_official_integrity_pass,
+        "decision_shadow_error": decision_shadow_error,
         "rejected": rejected,
         "universe_name": universe_name,
         "reference_signature": reference_signature(
@@ -4069,6 +4165,9 @@ render_entry_zone_diagnostics(res)
 
 st.divider()
 render_risk_reward_diagnostics(res)
+
+st.divider()
+render_decision_architecture_diagnostics(res)
 
 # -----------------------------------------------------------------------------
 # 4) Candidate accounting and buckets
