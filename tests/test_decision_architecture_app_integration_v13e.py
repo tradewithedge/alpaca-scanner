@@ -31,5 +31,7 @@ def test_v13e_rendered_before_candidates():
 
 def test_v13e_is_shadow_not_production_gate():
     assert "V1.3e SHADOW MODE" in SRC
+    assert "EXECUTION READY" in SRC
+    assert "TRADE-QUALITY ELIGIBLE" in SRC or "trade_quality_state" in SRC
     assert "official trade decisions" in SRC
     assert "not a production gate" in SRC or "does not" in SRC.lower()

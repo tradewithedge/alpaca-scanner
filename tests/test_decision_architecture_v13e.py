@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 
 from scanner.decision_architecture import (
-    READY, WATCH, WAIT, NO_CHASE,
+    EXECUTION_READY, READY, WATCH, WAIT, NO_CHASE,
     build_decision_architecture,
     summarize_decision_architecture,
 )
@@ -12,7 +12,7 @@ from scanner.decision_architecture import (
 class DecisionArchitectureTests(unittest.TestCase):
     def scored(self, close=100.0):
         return pd.DataFrame([{
-            "symbol": "ABC", "bucket": "A", "setup": "Breakout",
+            "symbol": "ABC", "bucket": "A-QUALITY — WAIT", "setup": "Breakout",
             "quality_score": 95.0, "entry_score": 90.0,
             "decision": "WAIT", "close": close,
         }])
@@ -33,8 +33,9 @@ class DecisionArchitectureTests(unittest.TestCase):
 
     def test_ready(self):
         out = build_decision_architecture(self.scored(101.2), self.zone("TRIGGERED — IN ENTRY ZONE"), self.rr())
-        self.assertEqual(out.iloc[0].decision_state, READY)
+        self.assertEqual(out.iloc[0].decision_state, EXECUTION_READY)
         self.assertTrue(out.iloc[0].decision_ready)
+        self.assertTrue(out.iloc[0].trade_quality_eligible)
 
     def test_watch_before_trigger(self):
         out = build_decision_architecture(self.scored(100.0), self.zone(), self.rr())
@@ -64,6 +65,25 @@ class DecisionArchitectureTests(unittest.TestCase):
         before = s.copy(deep=True)
         build_decision_architecture(s, self.zone("TRIGGERED — IN ENTRY ZONE"), self.rr())
         pd.testing.assert_frame_equal(s, before)
+
+    def test_developing_candidate_can_be_execution_ready_but_not_trade_quality_eligible(self):
+        s = self.scored(101.2)
+        s.loc[0, "bucket"] = "DEVELOPING"
+        s.loc[0, "quality_score"] = 77.3
+        out = build_decision_architecture(s, self.zone("TRIGGERED — IN ENTRY ZONE"), self.rr())
+        self.assertEqual(out.iloc[0].decision_state, EXECUTION_READY)
+        self.assertFalse(out.iloc[0].trade_quality_eligible)
+        self.assertEqual(out.iloc[0].trade_quality_state, "NOT TRADE-QUALITY ELIGIBLE")
+
+    def test_summary_exposes_execution_ready_outside_quality_layer(self):
+        rows = [
+            {"decision_state": EXECUTION_READY, "decision_ready": True, "trade_quality_eligible": False},
+            {"decision_state": EXECUTION_READY, "decision_ready": True, "trade_quality_eligible": True},
+        ]
+        summary = summarize_decision_architecture(pd.DataFrame(rows))
+        self.assertEqual(summary["ready"], 2)
+        self.assertEqual(summary["trade_quality_eligible"], 1)
+        self.assertEqual(summary["execution_ready_not_trade_quality"], 1)
 
     def test_summary(self):
         rows = []
