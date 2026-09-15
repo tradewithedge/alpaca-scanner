@@ -1,12 +1,12 @@
 # ALPACA Scanner - Development Chronicle & Architecture Record
 
-**Revision:** Rev.8  
-**Prepared:** 13 September 2026  
-**Current accepted implementation checkpoint:** V1.3d - Risk/Reward & Stop-Distance Diagnostics  
-**Current development checkpoint:** V1.3e - READY / WATCH / WAIT / NO CHASE Decision Architecture (SHADOW)  
+**Revision:** Rev.9  
+**Prepared:** 16 September 2026  
+**Current accepted implementation checkpoint:** V1.3e - EXECUTION READY / WATCH / WAIT / NO CHASE Decision Architecture  
+**Current development checkpoint:** V1.3e - EXECUTION READY / WATCH / WAIT / NO CHASE Decision Architecture (ACCEPTED / FROZEN SHADOW)  
 **V1.3d status:** **ACCEPTED / FROZEN (SHADOW)**  
 **Official decision-layer authority:** unchanged by V1.3d  
-**Next development checkpoint:** V1.3f - Shadow Execution Capture / Signal Capture Logging
+**Next permitted development checkpoint:** V1.3f - Shadow Execution Capture / Signal Capture Logging (PLANNED)
 
 > This is the authoritative living engineering-history record for the ALPACA Scanner. It preserves problems encountered, evidence observed, architecture selected, alternatives rejected, validation performed, frozen principles, open risks and the next permitted development move.
 
@@ -876,3 +876,15 @@ No official Candidate Quality, F15, Entry Quality, ranking, bucket, event gate, 
 
 ### Prevention rule
 **Never manufacture a trade by tightening the stop or moving the target until a desired R:R appears.**
+
+
+## 2026-09-16 — V1.3e Live Reconciliation Accepted / Freeze Checkpoint
+
+### V1.3e live evidence
+Fresh deployed scans were reviewed for S&P 500 and Russell 2000 (IWM proxy). S&P 500 produced 110 persistent-quality rows with 5 EXECUTION READY, 55 WATCH, 29 WAIT and 21 NO CHASE. Russell 2000 produced 29 persistent-quality rows with 0 EXECUTION READY, 6 WATCH, 18 WAIT and 5 NO CHASE.
+
+The key refinement case was preserved: four S&P EXECUTION READY names were A-quality eligible while MO remained execution-ready but **NOT TRADE-QUALITY ELIGIBLE**. This demonstrates that execution state and trade-quality eligibility are visibly separated rather than silently conflated.
+
+**Disposition:** V1.3e accepted/frozen as SHADOW.
+
+**Freeze disposition:** V1.3e is **ACCEPTED / FROZEN (SHADOW)**. V1.3f remains **PLANNED** and is not opened by this freeze record. The previously prepared V1.3f package is held pending the user's explicit approval after the V1.3e baseline is frozen.

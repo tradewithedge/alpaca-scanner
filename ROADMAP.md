@@ -1,10 +1,10 @@
 # ALPACA Scanner Project Charter & Roadmap
 
-**Revision:** Rev.9 - V1.3e Decision Architecture Shadow Refinement  
-**Prepared:** 11 September 2026  
-**Current accepted/frozen development checkpoint:** V1.3d - Risk/Reward & Stop-Distance Diagnostics (SHADOW)  
+**Revision:** Rev.10 - V1.3f Shadow Execution Capture  
+**Prepared:** 16 September 2026  
+**Current accepted/frozen development checkpoint:** V1.3e - EXECUTION READY / WATCH / WAIT / NO CHASE Decision Architecture (SHADOW)  
 **Official decision-layer authority:** unchanged by V1.3c; Candidate Quality, F15 Composite, official Entry Quality, ranking, buckets, event gates and trade decisions remain on the pre-V1.3b official path  
-**Current development stage:** V1.3e - EXECUTION READY / WATCH / WAIT / NO CHASE Decision Architecture (SHADOW REFINEMENT)
+**Current development stage:** V1.3f - Shadow Execution-Capture Logging / staged-execution preparation
 
 ## North Star
 
@@ -73,8 +73,8 @@ No unresolved item may remain only in conversational memory.
 | **V1.3b** | **Entry Location & Anti-Chase Foundation** | **ACCEPTED / FROZEN (SHADOW) - 11 Sep 2026** |
 | **V1.3c** | **Trigger & Entry-Zone Architecture** | **ACCEPTED / FROZEN (SHADOW) - 13 Sep 2026** |
 | **V1.3d** | **Risk/Reward & Stop-Distance Diagnostics** | **ACCEPTED / FROZEN (SHADOW) - 13 Sep 2026** |
-| **V1.3e** | **EXECUTION READY / WATCH / WAIT / NO CHASE Decision Architecture** | **IN DEVELOPMENT / SHADOW - REFINEMENT AFTER LIVE RECONCILIATION** |
-| V1.3f | Shadow Execution-Capture Logging / staged-execution preparation | Planned |
+| **V1.3e** | **EXECUTION READY / WATCH / WAIT / NO CHASE Decision Architecture** | **ACCEPTED / FROZEN (SHADOW) - 16 Sep 2026** |
+| **V1.3f** | **Shadow Execution-Capture Logging / staged-execution preparation** | **IN DEVELOPMENT / SHADOW** |
 | V1.4 | Market Regime & Deployment Engine | Planned |
 | V1.5 | Earnings / Event Reliability Layer | Planned |
 | V1.6 | Trade Plan & Portfolio Risk Engine | Planned |
@@ -487,7 +487,7 @@ V1.7 should evaluate conditional expectancy by setup, Candidate Quality, Entry Q
 - Scanner auditability: `████████████████████` 100%
 - Candidate intelligence: `████████████████████` 100% architecture-complete through frozen V1.2.3c; F15 still shadow-only
 - Fundamental-performance intelligence: `██████████████████░░` 90%
-- Entry intelligence: `████████████████░░░░` 80% - V1.3a/V1.3b/V1.3c/V1.3d frozen shadow; V1.3e decision architecture in shadow development
+- Entry intelligence: `█████████████████░░░` 85% - V1.3a/V1.3b/V1.3c/V1.3d/V1.3e frozen shadow; V1.3f capture foundation planned
 - Contextual Volume Quality diagnostics: `████████████████████` 100% - shadow architecture accepted; production scoring/expectancy deliberately unproven
 - Entry Location / Anti-Chase diagnostics: `████████████████████` 100% - shadow architecture accepted; production use/expectancy deliberately unproven
 - Event-date confidence: `██░░░░░░░░░░░░░░░░░░` 10%
@@ -496,32 +496,95 @@ V1.7 should evaluate conditional expectancy by setup, Candidate Quality, Entry Q
 
 The percentages describe implementation maturity, not expected trading performance.
 
-## V1.3e - READY / WATCH / WAIT / NO CHASE Decision Architecture
+## V1.3e - EXECUTION READY / WATCH / WAIT / NO CHASE Decision Architecture
 
 ### Objective
-V1.3e converts the frozen V1.3c entry-plan state and V1.3d risk geometry into a compact, decision-first shadow state: **READY / WATCH / WAIT / NO CHASE**. The purpose is to make scanner output operationally readable without weakening quality or changing the official trade-decision layer.
+V1.3e converts the frozen V1.3c entry-plan state and V1.3d risk geometry into a compact, decision-first shadow state: **EXECUTION READY / WATCH / WAIT / NO CHASE**. The purpose is to make scanner output operationally readable without weakening quality or changing the official trade-decision layer.
 
 ### State definitions
-- **READY** — structured, HIGH-confidence V1.3c plan; current price is inside the preferred entry zone; max-fill R:R remains at or above the provisional 1.5R research floor.
+- **EXECUTION READY** — structured, HIGH-confidence V1.3c plan; current price is inside the preferred entry zone; max-fill R:R remains at or above the provisional 1.5R research floor. This is execution-state readiness, not Trade With Edge trade approval.
 - **WATCH** — structured, HIGH-confidence plan is valid and price remains below the trigger; wait for trigger acceptance rather than anticipating.
 - **WAIT** — incomplete/non-structured plan, marginal risk geometry, or a state that does not meet the strict READY/WATCH definitions.
 - **NO CHASE** — V1.3c has already marked the setup late, missed above max fill, or blocked beyond the frozen anti-chase ceiling.
 
 ### Non-negotiable rules
 1. V1.3e is **SHADOW ONLY**. It does not rewrite official `decision`, Candidate Quality, Entry Quality, ranking, buckets, event gates, `entry_px`, `stop`, `t1` or `t2`.
-2. READY cannot be produced from missing or low-confidence planning data.
+2. EXECUTION READY cannot be produced from missing or low-confidence planning data.
 3. A late/blocked/no-chase V1.3c state can never be promoted to READY by V1.3e.
 4. V1.3e does not invent a new trigger, expand an entry zone, tighten a stop, or relax the anti-chase ceiling.
 5. The 1.5R max-fill criterion is a **provisional research floor**, not a proven production gate.
 6. Outcome authority remains Backtest + Forward Test + Expectancy work.
 
 ### Acceptance target
-V1.3e is accepted only after application compilation, focused unit/integration tests, official-layer equality validation, and live-universe shadow reconciliation.
+V1.3e acceptance requires application compilation, focused unit/integration tests, official-layer equality validation, and live-universe shadow reconciliation. The 15-16 Sep 2026 refinement also requires explicit separation of execution readiness from official trade-quality eligibility.
 
 ## Development Order From Here
 
-**V1.3a frozen -> V1.3b frozen -> V1.3c Trigger/Zone frozen -> V1.3d R:R -> V1.3e Decision UX -> V1.3f Shadow execution capture -> V1.4 Regime -> V1.5 Events -> V1.6 Risk -> V1.7 Expectancy Validation / Backtest / Forward Test -> V1.8 Paper -> V2.0.**
+**V1.3a frozen -> V1.3b frozen -> V1.3c Trigger/Zone frozen -> V1.3d R:R -> V1.3e Decision UX frozen -> V1.3f Shadow execution capture (next planned stage) -> V1.4 Regime -> V1.5 Events -> V1.6 Risk -> V1.7 Expectancy Validation / Backtest / Forward Test -> V1.8 Paper -> V2.0.**
 
+
+
+## V1.3e - Final Freeze Record
+
+**Status:** **ACCEPTED / FROZEN (SHADOW) - 16 Sep 2026**  
+**ADR:** `docs/architecture/ADR-006-ready-watch-wait-no-chase-v13e.md`
+
+### Freeze decision
+
+V1.3e is accepted as a **shadow decision architecture**. It converts V1.3c trigger/entry-zone state and V1.3d risk geometry into four operational states: **EXECUTION READY / WATCH / WAIT / NO CHASE**. It does not alter the official scoring, ranking, buckets, event gates, legacy trade-plan fields or trade decisions.
+
+### Live refinement acceptance
+
+Fresh deployed scans were reviewed after the 15 Sep refinement. S&P 500 showed **110 persistent-quality candidates: 5 EXECUTION READY / 55 WATCH / 29 WAIT / 21 NO CHASE**. Russell 2000 (IWM proxy) showed **29 persistent-quality candidates: 0 EXECUTION READY / 6 WATCH / 18 WAIT / 5 NO CHASE**.
+
+The key semantic acceptance case was MO: it may satisfy execution architecture conditions while remaining **NOT TRADE-QUALITY ELIGIBLE** because the official quality bucket is DEVELOPING. The refined architecture exposes this distinction rather than conflating execution readiness with trade approval.
+
+### Acceptance boundary
+
+- EXECUTION READY is **not** a Trade With Edge buy approval.
+- `trade_quality_state` and `trade_quality_eligible` are shadow diagnostics derived from the unchanged official bucket.
+- The provisional 1.5R max-fill floor remains research-only.
+- V1.3e does not prove expectancy and does not promote any shadow state into production authority.
+- Outcome validation remains assigned to Backtest + Forward Test + Expectancy work.
+
+### Next permitted development move
+
+V1.3f remains **PLANNED / NOT YET OPENED**. It may begin only after this freeze checkpoint is recorded as accepted.
+
+## V1.3f - Shadow Execution-Capture Logging / Staged-Execution Preparation
+
+### Objective
+V1.3f begins the prospective evidence trail required for V1.7 Expectancy Validation. It records the scanner's observable signal state at capture time, including quality, entry architecture, trigger/zone geometry and decision state, while leaving outcome fields blank until independently observed.
+
+### Shadow-only architecture
+- New module: `scanner/execution_capture.py`.
+- Capture is **manual and prospective** through the Streamlit UI; the scanner does not automatically manufacture historical outcomes.
+- Each capture has a deterministic batch/symbol `capture_id` so repeated clicks do not duplicate the same scan.
+- The log records signal timestamp, universe, official quality fields, Entry Quality, setup, V1.3e decision state, V1.3c trigger/zone/max-fill references and V1.3d max-fill R:R.
+- Outcome fields (`fill_status`, fill price, slippage, invalidation, MAE/MFE, exit, realized R, Missed Opportunity R) remain unrecorded at signal time.
+- The 30/30/40 A/B/C tranche labels are retained only as **shadow execution-preparation references**; they are not production sizing or order rules.
+- No broker order endpoint, fill endpoint or portfolio-position mutation is introduced.
+- Session capture is downloadable as CSV so the prospective dataset can be preserved outside the Streamlit session until a later persistent journal/storage layer.
+
+### Execution-capture semantics
+**A — Starter (30%)**: planning reference when an A-quality candidate is execution-ready and inside the preferred zone.
+
+**B — Add (30%)**: conditional reference after trigger acceptance, bounded by the existing maximum-fill boundary.
+
+**C — Full Trigger (40%)**: conditional continuation/retest confirmation reference, still subject to the existing maximum-fill boundary.
+
+These labels convert the CF Case Study #001 lesson into an explicit execution architecture without loosening scanner quality or anti-chase standards. They do not imply that a fill occurred.
+
+### Non-negotiable rules
+1. V1.3f never changes official Candidate Quality, F15 Composite, Entry Quality, ranking, buckets, event gates or trade decisions.
+2. A non-trade-quality-eligible candidate cannot receive an active A/B/C staged plan.
+3. No fill, slippage or outcome may be inferred from price movement alone.
+4. Missing outcome data remains `UNRECORDED`, not success/failure.
+5. V1.3f is logging infrastructure, not an expectancy claim and not a trading/execution system.
+6. V1.7 remains the authority for historical Backtest + prospective Forward-Test outcome validation and expectancy.
+
+### Acceptance target
+V1.3f is accepted only after module tests, app integration checks, official-layer isolation review, live deployed smoke test and successful prospective capture/download of at least one S&P 500 and one Russell 2000 scan.
 
 ## V1.3d - Risk/Reward & Stop-Distance Shadow Opening
 
