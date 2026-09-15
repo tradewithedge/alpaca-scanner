@@ -1,7 +1,7 @@
 # ADR-006 — V1.3e EXECUTION READY / WATCH / WAIT / NO CHASE Decision Architecture
 
-**Status:** IN DEVELOPMENT / SHADOW  
-**Date:** 13 September 2026  
+**Status:** **ACCEPTED / FROZEN (SHADOW)**  
+**Date:** 16 September 2026  
 **Depends on:** V1.3c Trigger & Entry-Zone Architecture; V1.3d Risk/Reward & Stop-Distance Diagnostics
 
 ## Context
@@ -15,25 +15,33 @@ Implement a separate `scanner/decision_architecture.py` module. It consumes froz
 - **WAIT:** incomplete, non-structured, marginal, unknown or otherwise non-ready state.
 - **NO CHASE:** V1.3c late, missed-above-max-fill, or blocked-beyond-ceiling state.
 
+## Quality-separation refinement
+Live reconciliation identified a semantic risk: an official `DEVELOPING` candidate could satisfy execution conditions. The user-facing state is therefore explicitly **EXECUTION READY**, and the shadow output exposes `trade_quality_state` and `trade_quality_eligible` derived from the unchanged official bucket. This is a diagnostic separation, not a new production gate.
+
 ## Non-negotiable constraints
 1. Shadow only; no production gate.
 2. Never mutate the official `scored` frame.
 3. Never rewrite official decision, Candidate Quality, Entry Quality, ranking, buckets, event gates or legacy trade-plan fields.
 4. Never invent or widen a trigger/entry zone.
-5. Never tighten a stop or move a target to create READY.
-6. Missing/low-confidence planning data cannot become READY.
+5. Never tighten a stop or move a target to create EXECUTION READY.
+6. Missing/low-confidence planning data cannot become EXECUTION READY.
 7. V1.3c NO CHASE boundaries remain authoritative.
 8. The 1.5R max-fill criterion is provisional research, not proven expectancy.
+9. EXECUTION READY outside the official A-quality layer must remain visibly marked NOT TRADE-QUALITY ELIGIBLE.
 
-## Rationale
-The architecture separates **execution-state readability** from **trade-quality authority**. EXECUTION READY is intentionally narrow; WATCH preserves the discipline of waiting for a trigger; WAIT prevents incomplete evidence from becoming an action; NO CHASE makes late execution explicit.
+## Validation and live acceptance
+- Targeted V1.3e refinement validation: **16/16 PASS**.
+- Original V1.3e focused/regression validation before refinement: **28/28 PASS**.
+- `py_compile`: PASS.
+- Official-layer deep-copy equality guard: PASS.
+- Fresh deployed S&P 500 and Russell 2000 scans reconciled to the refined decision-state architecture.
 
-## Validation target
-Application compilation, V1.3d regression tests, V1.3e unit/integration tests, official-layer equality, and live S&P 500/Russell 2000 reconciliation are required before acceptance/freeze.
+### Live evidence
+- S&P 500: 110 persistent-quality candidates; **5 EXECUTION READY / 55 WATCH / 29 WAIT / 21 NO CHASE**.
+- Russell 2000 (IWM proxy): 29 persistent-quality candidates; **0 EXECUTION READY / 6 WATCH / 18 WAIT / 5 NO CHASE**.
+- MO remained a visible semantic exception: execution-ready but **NOT TRADE-QUALITY ELIGIBLE**.
 
+## Acceptance boundary
+V1.3e is a frozen shadow architecture, not a proven trading edge. It does not authorize production changes to scoring, ranking, Entry Quality, buckets, event gates or trade decisions. Expectancy validation remains assigned to Backtest + Forward Test + V1.7.
 
-## Live reconciliation refinement — 15 September 2026
-
-S&P 500 and Russell 2000 live diagnostics exposed one important semantic risk: an official `DEVELOPING` candidate (MO, CQ 77.3) satisfied the V1.3c/V1.3d execution conditions and therefore appeared as READY. This did not violate the shadow logic, but the label could be misread as Trade With Edge trade approval.
-
-Corrective architecture: rename the user-facing state to **EXECUTION READY** while preserving the execution logic, and add shadow-only `trade_quality_state` / `trade_quality_eligible` fields derived from the unchanged official bucket. This keeps Candidate Quality and Entry Quality authoritative and separate; it does not add a production trade gate. The UI explicitly warns when EXECUTION READY exists outside the A-quality layer.
+**Next permitted development move:** V1.3f Shadow Execution-Capture Logging / staged-execution preparation, only after this freeze checkpoint is committed.
