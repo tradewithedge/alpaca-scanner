@@ -8,7 +8,7 @@ MOD=(ROOT/"scanner/risk_reward.py").read_text()
 
 class TestV13dAppIntegration(unittest.TestCase):
     def test_app_parses(self): ast.parse(APP)
-    def test_version(self): self.assertIn('APP_VERSION = "V1.3d"',APP)
+    def test_version(self): self.assertIn('APP_VERSION = "V1.3e"',APP)
     def test_import_reload_and_alias(self):
         self.assertIn('import scanner.risk_reward as risk_reward_module',APP)
         self.assertIn('risk_reward_module,',APP)
