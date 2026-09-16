@@ -28,3 +28,20 @@ def test_app_keeps_execution_analysis_only():
     assert "does NOT place orders" in text
     assert "does NOT" in text
     assert "broker/execution action" in text
+
+
+def test_app_distinguishes_current_scan_from_session_capture_totals():
+    text = APP.read_text(encoding="utf-8")
+    assert 'CURRENT SCAN — selected universe' in text
+    assert 'SESSION CAPTURE LOG — cumulative across captured universes' in text
+    assert 'SIGNAL ROWS' in text
+    assert 'session_summary = summarize_execution_capture(existing)' in text
+    assert 'current_summary = summarize_execution_capture(snapshot)' in text
+    assert 'Current-scan metrics describe only the selected universe.' in text
+
+
+def test_app_does_not_label_cumulative_session_rows_as_current_universe_rows():
+    text = APP.read_text(encoding="utf-8")
+    assert 's1.metric("CAPTURED ROWS", session_summary["rows"])' in text
+    assert 'c1.metric("SIGNAL ROWS", current_summary["rows"])' in text
+    assert 'all V1.3f captures in this Streamlit session' in text
