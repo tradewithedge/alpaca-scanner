@@ -1857,16 +1857,28 @@ def render_execution_capture_diagnostics(scan):
         st.session_state.v13f_capture_log = pd.DataFrame()
 
     existing = st.session_state.v13f_capture_log
-    summary = summarize_execution_capture(existing)
+    session_summary = summarize_execution_capture(existing)
+    current_summary = summarize_execution_capture(snapshot)
+
+    st.markdown("**CURRENT SCAN — selected universe**")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("CAPTURED ROWS", summary["rows"])
-    c2.metric("QUALITY-ELIGIBLE", summary["eligible"])
-    c3.metric("EXECUTION READY", summary["execution_ready"])
-    c4.metric("OUTCOME RECORDED", summary["outcome_recorded"])
+    c1.metric("SIGNAL ROWS", current_summary["rows"])
+    c2.metric("QUALITY-ELIGIBLE", current_summary["eligible"])
+    c3.metric("EXECUTION READY", current_summary["execution_ready"])
+    c4.metric("OUTCOME RECORDED", current_summary["outcome_recorded"])
+
+    st.markdown("**SESSION CAPTURE LOG — cumulative across captured universes**")
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("CAPTURED ROWS", session_summary["rows"])
+    s2.metric("QUALITY-ELIGIBLE", session_summary["eligible"])
+    s3.metric("EXECUTION READY", session_summary["execution_ready"])
+    s4.metric("OUTCOME RECORDED", session_summary["outcome_recorded"])
 
     st.caption(
-        f"Current scan: {len(snapshot):,} signal rows. A/B/C preparation = 30% Starter / 30% Add / "
-        "40% Full Trigger as shadow references only. Outcome fields remain blank until independently recorded."
+        "Current-scan metrics describe only the selected universe. Session-capture metrics are cumulative across "
+        "all V1.3f captures in this Streamlit session; they must not be interpreted as counts for the selected universe. "
+        "A/B/C preparation = 30% Starter / 30% Add / 40% Full Trigger as shadow references only. Outcome fields remain "
+        "blank until independently recorded."
     )
 
     if st.button("Capture this scan into V1.3f Forward-Test Log", key="capture_v13f_scan"):
