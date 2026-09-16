@@ -1,12 +1,12 @@
 # ALPACA Scanner - Development Chronicle & Architecture Record
 
-**Revision:** Rev.9  
+**Revision:** Rev.10  
 **Prepared:** 16 September 2026  
-**Current accepted implementation checkpoint:** V1.3e - EXECUTION READY / WATCH / WAIT / NO CHASE Decision Architecture  
-**Current development checkpoint:** V1.3e - EXECUTION READY / WATCH / WAIT / NO CHASE Decision Architecture (ACCEPTED / FROZEN SHADOW)  
+**Current accepted implementation checkpoint:** V1.3f - Shadow Execution-Capture Logging / staged-execution preparation  
+**Current development checkpoint:** V1.7 - Forward-Test Evidence Collection / Expectancy Validation  
 **V1.3d status:** **ACCEPTED / FROZEN (SHADOW)**  
 **Official decision-layer authority:** unchanged by V1.3d  
-**Next permitted development checkpoint:** V1.3f - Shadow Execution Capture / Signal Capture Logging (PLANNED)
+**Next permitted development checkpoint:** V1.7 - Forward-Test Evidence Collection / Expectancy Validation
 
 > This is the authoritative living engineering-history record for the ALPACA Scanner. It preserves problems encountered, evidence observed, architecture selected, alternatives rejected, validation performed, frozen principles, open risks and the next permitted development move.
 
@@ -906,3 +906,28 @@ Offline focused validation: **31/31 PASS** across the V1.3e focused tests plus V
 Live deployed smoke test and successful prospective S&P 500 + Russell 2000 capture/download remain required before V1.3f can be accepted/frozen.
 
 **Current status:** V1.3f **IN DEVELOPMENT / SHADOW**.
+
+
+## 2026-09-16 — V1.3f Live Reconciliation and Formal Freeze
+
+### Evidence
+The V1.3f shadow execution-capture workflow was exercised on the deployed scanner for S&P 500 and Russell 2000. The live UI and supplied CSV captures reconcile exactly:
+
+- S&P 500: **123 signals / 79 quality-eligible / 5 EXECUTION READY / 0 outcomes recorded**.
+- Russell 2000: **88 signals / 55 quality-eligible / 1 EXECUTION READY / 0 outcomes recorded**.
+- Combined session capture: **211 rows / 134 quality-eligible / 6 EXECUTION READY / 0 outcomes recorded**.
+
+The Russell 2000 pre-capture screen showed the S&P session totals, while its post-capture screen showed the cumulative session totals increasing from 123 to 211 and execution-ready count from 5 to 6. The corrected UI explicitly labels the scopes as **CURRENT SCAN — selected universe** and **SESSION CAPTURE LOG — cumulative across captured universes**.
+
+### Integrity result
+Capture IDs remained duplicate-protected. Outcome fields remained `UNRECORDED`. The 30/30/40 A/B/C tranche references remained shadow-only. No official Candidate Quality, F15, Entry Quality, ranking, buckets, event gates, legacy trade-plan fields or broker execution behavior was changed.
+
+### Formal decision
+The V1.3f acceptance target is satisfied: offline validation passed, deployment smoke testing passed, and prospective S&P 500 + Russell 2000 capture/download evidence was supplied.
+
+**Decision:** **V1.3f ACCEPTED / FROZEN (SHADOW).**
+
+This freeze is a documentation gate after technical/live validation; it does not retroactively conflate those earlier checks with formal acceptance.
+
+### Next stage
+Proceed to **Forward-Test evidence collection under the V1.7 Expectancy / Backtest / Forward-Test validation program**. Preserve V1.3f as frozen while outcomes accumulate. No new architecture change may open without Roadmap Reconciliation.

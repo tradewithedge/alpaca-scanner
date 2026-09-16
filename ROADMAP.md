@@ -1,10 +1,10 @@
 # ALPACA Scanner Project Charter & Roadmap
 
-**Revision:** Rev.10 - V1.3f Shadow Execution Capture  
+**Revision:** Rev.11 - V1.3f Formal Freeze / Forward-Test Evidence  
 **Prepared:** 16 September 2026  
-**Current accepted/frozen development checkpoint:** V1.3e - EXECUTION READY / WATCH / WAIT / NO CHASE Decision Architecture (SHADOW)  
+**Current accepted/frozen development checkpoint:** V1.3f - Shadow Execution-Capture Logging / staged-execution preparation (SHADOW)  
 **Official decision-layer authority:** unchanged by V1.3c; Candidate Quality, F15 Composite, official Entry Quality, ranking, buckets, event gates and trade decisions remain on the pre-V1.3b official path  
-**Current development stage:** V1.3f - Shadow Execution-Capture Logging / staged-execution preparation
+**Current development stage:** V1.7 Forward-Test Evidence Collection / Expectancy Validation
 
 ## North Star
 
@@ -74,7 +74,7 @@ No unresolved item may remain only in conversational memory.
 | **V1.3c** | **Trigger & Entry-Zone Architecture** | **ACCEPTED / FROZEN (SHADOW) - 13 Sep 2026** |
 | **V1.3d** | **Risk/Reward & Stop-Distance Diagnostics** | **ACCEPTED / FROZEN (SHADOW) - 13 Sep 2026** |
 | **V1.3e** | **EXECUTION READY / WATCH / WAIT / NO CHASE Decision Architecture** | **ACCEPTED / FROZEN (SHADOW) - 16 Sep 2026** |
-| **V1.3f** | **Shadow Execution-Capture Logging / staged-execution preparation** | **IN DEVELOPMENT / SHADOW** |
+| **V1.3f** | **Shadow Execution-Capture Logging / staged-execution preparation** | **ACCEPTED / FROZEN (SHADOW) - 16 Sep 2026** |
 | V1.4 | Market Regime & Deployment Engine | Planned |
 | V1.5 | Earnings / Event Reliability Layer | Planned |
 | V1.6 | Trade Plan & Portfolio Risk Engine | Planned |
@@ -642,3 +642,30 @@ Local focused validation completed for the V1.3d implementation: **80 tests PASS
 
 ### Research boundary
 V1.3d does not prove that 2R is the correct threshold, that 1.5R/2.5R are optimal targets, or that 0.25 ATR is the correct stop buffer. These parameters must later be tested across historical and prospective samples. The central outcome metric remains **expectancy**, with Backtest and Forward-Test evidence.
+
+
+## V1.3f - Formal Freeze Record: Shadow Execution Capture
+
+**Status:** **ACCEPTED / FROZEN (SHADOW) - 16 Sep 2026**  
+**ADR:** `docs/architecture/ADR-007-shadow-execution-capture-v13f.md`
+
+### Live acceptance
+
+The deployed V1.3f workflow was exercised on both supported research universes and prospective capture/download evidence was supplied.
+
+- **S&P 500:** 123 current signal rows; 79 quality-eligible; 5 EXECUTION READY; 0 outcomes recorded.
+- **Russell 2000:** 88 current signal rows; 55 quality-eligible; 1 EXECUTION READY; 0 outcomes recorded.
+- **Combined session capture:** 211 rows; 134 quality-eligible; 6 EXECUTION READY; 0 outcomes recorded.
+- Reconciliation is exact: 123+88=211, 79+55=134, 5+1=6.
+- The UI now explicitly separates current-scan metrics from cumulative session-capture metrics.
+- Outcome fields remain `UNRECORDED`; no hindsight result is inferred.
+
+### Freeze decision
+
+V1.3f module/integration validation, deployment smoke testing, prospective S&P 500 capture and prospective Russell 2000 capture satisfied the defined acceptance target. The 30/30/40 A/B/C tranche structure remains shadow preparation only. No official scoring, ranking, bucket, event-gate, entry-quality, anti-chase or broker-execution behavior was changed.
+
+**Decision:** **V1.3f is ACCEPTED / FROZEN (SHADOW).**
+
+### Next permitted work
+
+Proceed to **Forward-Test evidence collection under V1.7 Expectancy / Backtest / Forward-Test validation**. Continue collecting outcomes prospectively while preserving the frozen V1.3f architecture. Any architecture change requires a new documented phase and Roadmap Reconciliation before implementation.
