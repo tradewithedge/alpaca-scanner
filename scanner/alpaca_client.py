@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -148,6 +148,106 @@ class AlpacaClient:
                     "vw": b.get("vw"),
                 }
         return out
+
+    @staticmethod
+    def _normalise_asof_utc(as_of: date | datetime | str) -> datetime:
+        """Normalize an as-of date/time to UTC; date-only input means UTC midnight."""
+        if isinstance(as_of, datetime):
+            value = as_of
+        elif isinstance(as_of, date):
+            value = datetime(as_of.year, as_of.month, as_of.day, tzinfo=timezone.utc)
+        elif isinstance(as_of, str):
+            raw = as_of.strip()
+            if not raw:
+                raise ValueError("as_of must not be empty")
+            if len(raw) == 10:
+                value = datetime.fromisoformat(raw).replace(tzinfo=timezone.utc)
+            else:
+                value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        else:
+            raise TypeError("as_of must be a date, datetime, or ISO-8601 string")
+
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    def get_daily_bars_asof(
+        self,
+        symbols: List[str],
+        as_of: date | datetime | str,
+        days: int = 280,
+        batch_size: int = 30,
+    ) -> pd.DataFrame:
+        """Return daily bars no later than an explicit point-in-time cutoff.
+
+        This is intended for historical replay, not live scanning. The caller
+        supplies the as-of cutoff; the method requests historical SIP bars up
+        to that cutoff, follows all pages, and defensively filters future bars.
+        """
+        if days <= 0:
+            raise ValueError("days must be positive")
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+
+        columns = [
+            "symbol", "timestamp", "open", "high", "low", "close",
+            "volume", "trade_count", "vwap",
+        ]
+        if not symbols:
+            return pd.DataFrame(columns=columns)
+
+        cutoff = self._normalise_asof_utc(as_of)
+        start_dt = cutoff - timedelta(days=max(days * 2, 420))
+        start = start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        end = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+        url = f"{self.creds.data_base_url.rstrip('/')}/v2/stocks/bars"
+        rows = []
+
+        for batch in self.chunks(symbols, batch_size):
+            page_token = None
+            while True:
+                params = {
+                    "symbols": ",".join(batch),
+                    "timeframe": "1Day",
+                    "start": start,
+                    "end": end,
+                    "adjustment": "all",
+                    "feed": self.creds.historical_feed,
+                    "sort": "asc",
+                    "limit": 10000,
+                }
+                if page_token:
+                    params["page_token"] = page_token
+
+                payload = self._get(url, params)
+                bars = payload.get("bars", {}) if isinstance(payload, dict) else {}
+                for symbol, items in bars.items():
+                    for bar in items:
+                        rows.append({
+                            "symbol": symbol,
+                            "timestamp": bar.get("t"),
+                            "open": bar.get("o"),
+                            "high": bar.get("h"),
+                            "low": bar.get("l"),
+                            "close": bar.get("c"),
+                            "volume": bar.get("v"),
+                            "trade_count": bar.get("n"),
+                            "vwap": bar.get("vw"),
+                        })
+
+                page_token = payload.get("next_page_token") if isinstance(payload, dict) else None
+                if not page_token:
+                    break
+
+        if not rows:
+            return pd.DataFrame(columns=columns)
+
+        df = pd.DataFrame(rows)
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+        df = df.dropna(subset=["timestamp"])
+        df = df[df["timestamp"] <= pd.Timestamp(cutoff)]
+        df = df.sort_values(["symbol", "timestamp"])
+        return df.groupby("symbol", group_keys=False).tail(days).reset_index(drop=True)
 
     def get_daily_bars(
         self,
